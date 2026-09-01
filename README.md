@@ -147,6 +147,11 @@ must use task-balanced hierarchical bootstrap (resample tasks, then paired
 seeds within task). Report delta SR, delta MS, delta distance AUC, and delta
 recovery lag with 95% confidence intervals.
 
+The analyzer bootstraps the L3-minus-L1 interaction directly on identities
+having all required paired cells; it does not subtract two independently
+estimated intervals. It also reports RANDOM-FULL and STALE-FULL controls for
+both SR and MS.
+
 ## Gates and stopping
 
 1. **A — reproduction:** one official L1 task produces nonzero SR/MS plus
