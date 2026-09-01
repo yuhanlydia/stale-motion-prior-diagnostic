@@ -99,6 +99,19 @@ budget with crash-safe per-run logs and a resumable journal:
 python scripts/run_budget.py runs/smoke_commands.jsonl --hours 10
 ```
 
+Run `python scripts/preflight.py` first. A CUDA-visible container is not enough:
+DOMINO/SAPIEN also requires `NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics`
+and an NVIDIA Vulkan physical device. DOMINO's render probe can print
+`Render Error` and exit with code zero, so the budget runner additionally
+requires a nonempty query log and `SYNC-EPISODE-SUMMARY` before marking a row
+complete.
+
+`scripts/prepare_eval_queue.py` can generate exact one-episode official DOMINO
+configs and argv-only commands. It snapshots Level 1/2/3 task configs by
+changing only `dynamic_level`, sets a unique official output root, and includes
+the pinned runtime/CuRobo paths. The queue runner honors each row's explicit
+working directory and environment.
+
 Queue rows should be ordered by `(task, level, seed)` and then all four
 conditions, ensuring paired seeds complete together as often as possible.
 

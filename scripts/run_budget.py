@@ -52,12 +52,24 @@ def main() -> int:
         label = "_".join(map(str, key(row)))
         log_path = args.logs / f"{label}.log"
         env = os.environ.copy()
-        env.update({"SMP_MODE": row["condition"], "SMP_LOG": str(args.logs / f"{label}.jsonl")})
+        row_env = row.get("env", {})
+        if not isinstance(row_env, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in row_env.items()):
+            raise ValueError(f"queue row env must be a string mapping: {row_env!r}")
+        env.update(row_env)
+        query_log = args.logs / f"{label}.jsonl"
+        env.update({"SMP_MODE": row["condition"], "SMP_LOG": str(query_log)})
         if row.get("random_reset_queries"):
             env["SMP_RANDOM_RESETS"] = ",".join(map(str, row["random_reset_queries"]))
         started = time.time()
         with log_path.open("ab") as log:
-            process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=env, start_new_session=True)
+            process = subprocess.Popen(
+                command,
+                cwd=row.get("cwd"),
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                env=env,
+                start_new_session=True,
+            )
             while process.poll() is None and time.monotonic() < deadline:
                 time.sleep(5)
             if process.poll() is None:
@@ -67,7 +79,19 @@ def main() -> int:
                 except subprocess.TimeoutExpired:
                     os.killpg(process.pid, signal.SIGKILL)
                     process.wait()
-        append(args.journal, {**{k: row[k] for k in ("task", "level", "seed", "condition")}, "status": "complete" if process.returncode == 0 else "failed", "returncode": process.returncode, "started_unix": started, "finished_unix": time.time(), "log": str(log_path)})
+        log_text = log_path.read_text(encoding="utf-8", errors="replace")
+        query_ok = query_log.is_file() and query_log.stat().st_size > 0
+        summary_ok = "SYNC-EPISODE-SUMMARY" in log_text
+        complete = process.returncode == 0 and query_ok and summary_ok
+        failure_reason = None
+        if not complete:
+            failure_reason = (
+                "render_error" if "Render Error" in log_text else
+                "missing_query_log" if not query_ok else
+                "missing_episode_summary" if not summary_ok else
+                f"returncode_{process.returncode}"
+            )
+        append(args.journal, {**{k: row[k] for k in ("task", "level", "seed", "condition")}, "status": "complete" if complete else "failed", "failure_reason": failure_reason, "returncode": process.returncode, "started_unix": started, "finished_unix": time.time(), "log": str(log_path), "query_log": str(query_log)})
         if time.monotonic() >= deadline:
             break
     return 0
@@ -75,4 +99,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
