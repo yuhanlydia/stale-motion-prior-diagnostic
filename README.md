@@ -141,3 +141,11 @@ method until Gate-0 survives.
   Gripper pose extraction is embodiment-specific and must be validated before
   distance AUC/recovery lag are treated as complete.
 
+### RoboTwin embodiments archive bug
+
+The pinned `embodiments.zip` SHA is correct, but the archive contains macOS
+resource forks while DynamicWAM's manifest records a cleaned extraction tree.
+The upstream pre-extraction count therefore fails before it can clean anything.
+`scripts/extract_robotwin_archive.py` verifies the pinned archive SHA, rejects
+unsafe members, excludes only `__MACOSX`, refuses overwrite, and writes a JSON
+provenance report. This workaround must remain visible in every run manifest.
