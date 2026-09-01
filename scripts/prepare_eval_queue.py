@@ -60,6 +60,7 @@ def main() -> int:
             for seed in args.seeds:
                 for condition in args.conditions:
                     label = f"{task}_l{level}_s{seed}_{condition}"
+                    trajectory_snapshot = output / "trajectory_snapshots" / f"{task}_l{level}_requested_s{seed}.pkl"
                     run_config = {
                         "policy_name": "ciwam.adapters.domino.deploy_policy_sync_flow",
                         "task_name": task,
@@ -86,6 +87,7 @@ def main() -> int:
                             "CUDA_VISIBLE_DEVICES": "0",
                             "CUBLAS_WORKSPACE_CONFIG": ":4096:8",
                             "PYTHONUNBUFFERED": "1",
+                            "SMP_TRAJECTORY_SNAPSHOT": str(trajectory_snapshot),
                         },
                         "command": [str(python), str(domino / "script" / "eval_policy.py"), "--config", str(config_path)],
                     })

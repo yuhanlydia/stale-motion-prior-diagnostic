@@ -1,0 +1,42 @@
+diff --git a/script/eval_policy.py b/script/eval_policy.py
+--- a/script/eval_policy.py
++++ b/script/eval_policy.py
+@@
+ import time
++import pickle
+@@
+         # Save dynamic motion info from Expert phase
+         saved_dynamic_motion_info = getattr(TASK_ENV, '_saved_dynamic_motion_info', None)
++        trajectory_snapshot = os.environ.get("SMP_TRAJECTORY_SNAPSHOT")
++        history_mode = os.environ.get("SMP_MODE", "full")
++        if trajectory_snapshot:
++            snapshot_path = Path(trajectory_snapshot)
++            if history_mode == "full":
++                snapshot_path.parent.mkdir(parents=True, exist_ok=True)
++                temporary = snapshot_path.with_name(f".{snapshot_path.name}.tmp-{os.getpid()}")
++                with temporary.open("wb") as handle:
++                    pickle.dump(
++                        {"actual_seed": int(now_seed), "motion": saved_dynamic_motion_info},
++                        handle,
++                        protocol=pickle.HIGHEST_PROTOCOL,
++                    )
++                    handle.flush()
++                    os.fsync(handle.fileno())
++                os.replace(temporary, snapshot_path)
++                print(f"[smp-trajectory] froze seed={now_seed} path={snapshot_path}")
++            else:
++                if not snapshot_path.is_file():
++                    raise FileNotFoundError(
++                        f"FULL trajectory snapshot must exist before {history_mode}: {snapshot_path}"
++                    )
++                with snapshot_path.open("rb") as handle:
++                    frozen = pickle.load(handle)
++                if int(frozen["actual_seed"]) != int(now_seed):
++                    raise RuntimeError(
++                        "trajectory snapshot seed mismatch: "
++                        f"snapshot={frozen['actual_seed']} evaluator={now_seed}"
++                    )
++                saved_dynamic_motion_info = frozen["motion"]
++                print(f"[smp-trajectory] loaded seed={now_seed} path={snapshot_path}")
+ 
+         args["render_freq"] = render_freq
