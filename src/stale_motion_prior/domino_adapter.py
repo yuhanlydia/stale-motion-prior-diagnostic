@@ -48,6 +48,10 @@ def _workspace_ok(task_env: Any, xyz: np.ndarray) -> bool:
 
 class DiagnosticDeployModel:
     def __init__(self, usr_args: dict[str, Any]) -> None:
+        torch.use_deterministic_algorithms(True)
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cuda.matmul.allow_tf32 = False
         self.policy = DynamicWAMPolicy(usr_args["dynamicwam_deploy_config"], project_root=usr_args["dynamicwam_root"])
         self.policy.setup()
         mode = Mode(os.environ.get("SMP_MODE", "full"))

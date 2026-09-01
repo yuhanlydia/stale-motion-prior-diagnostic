@@ -84,6 +84,7 @@ def main() -> int:
                         "env": {
                             "PYTHONPATH": pythonpath,
                             "CUDA_VISIBLE_DEVICES": "0",
+                            "CUBLAS_WORKSPACE_CONFIG": ":4096:8",
                             "PYTHONUNBUFFERED": "1",
                         },
                         "command": [str(python), str(domino / "script" / "eval_policy.py"), "--config", str(config_path)],
@@ -108,4 +109,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
