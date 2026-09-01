@@ -116,6 +116,9 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
         logged_event = model.pending_change_event or event
         geometry = ee_geometry(TASK_ENV, target)
         model.logger.write({
+            "task": os.environ.get("SMP_TASK", "unknown"),
+            "level": int(os.environ.get("SMP_LEVEL", "-1")),
+            "seed": int(os.environ.get("SMP_SEED", "-1")),
             "query": model.query,
             "simulator_time": now,
             "target_xyz": target.tolist(),

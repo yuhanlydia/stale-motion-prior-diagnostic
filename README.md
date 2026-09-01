@@ -123,6 +123,11 @@ draw random reset queries with the same count, stratified by task/level, while
 excluding true-change cooldown windows. Commit the generated schedule before
 opening condition outcomes. Never tune it using policy loss or final MS.
 
+Use `scripts/build_random_reset_schedule.py` on FULL query logs to freeze that
+schedule. It reads only task/level/seed, episode length, pre-grasp change flags,
+and query indices—never outcomes. `scripts/summarize_mechanism.py` then computes
+per-change distance AUC and recovery lag from completed condition logs.
+
 ## Analysis
 
 Episode result JSONL must contain `task`, `level`, `seed`, `condition`, `sr`,
