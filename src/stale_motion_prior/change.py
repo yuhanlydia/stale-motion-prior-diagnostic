@@ -10,8 +10,8 @@ from typing import Any
 import numpy as np
 
 
-def commanded_segment_index(task_env: Any) -> int | None:
-    """Read DOMINO's ground-truth regime for an active Level-3 target."""
+def commanded_segment_task(task_env: Any) -> dict[str, Any] | None:
+    """Return DOMINO's active Level-3 task for the configured target."""
     try:
         actor = task_env.get_dynamic_motion_config()["target_actor"]
     except (AttributeError, KeyError, TypeError):
@@ -28,8 +28,32 @@ def commanded_segment_index(task_env: Any) -> int | None:
             and entity.get_name() == actor.get_name()
         )
         if entity is actor or same_name:
-            return int(task["current_segment_idx"])
+            return task
     return None
+
+
+def commanded_segment_index(task_env: Any) -> int | None:
+    """Read DOMINO's ground-truth regime for an active Level-3 target."""
+    task = commanded_segment_task(task_env)
+    return None if task is None else int(task["current_segment_idx"])
+
+
+def commanded_segment_spec(task_env: Any) -> list[dict[str, Any]] | None:
+    """Return the immutable commanded trajectory parameters in JSON form."""
+    task = commanded_segment_task(task_env)
+    if task is None:
+        return None
+    fields = ("type", "duration", "start_pos", "end_pos", "velocity", "poly_x", "poly_y")
+    result: list[dict[str, Any]] = []
+    for segment in task["segments"]:
+        clean: dict[str, Any] = {}
+        for key in fields:
+            if key not in segment:
+                continue
+            value = segment[key]
+            clean[key] = value.tolist() if hasattr(value, "tolist") else value
+        result.append(clean)
+    return result
 
 
 @dataclass(frozen=True)

@@ -25,7 +25,7 @@ from dynamicwam.runtime.ciwam.execution import NativeStepper
 from dynamicwam.runtime.ciwam.flow import HeadFlowBuffer
 from dynamicwam.runtime.ciwam.wam.policy import DynamicWAMPolicy
 
-from .change import ChangeDetector, ChangeDetectorConfig, commanded_segment_index
+from .change import ChangeDetector, ChangeDetectorConfig, commanded_segment_index, commanded_segment_spec
 from .intervention import HistoryIntervention, InterventionConfig, Mode
 from .logging import JsonlLogger
 from .geometry import ee_geometry, is_grasped
@@ -116,6 +116,7 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
         in_workspace=_workspace_ok(TASK_ENV, target),
     )
     segment_index = commanded_segment_index(TASK_ENV)
+    segment_spec = commanded_segment_spec(TASK_ENV)
     commanded_change = (
         segment_index is not None
         and model.commanded_segment_index is not None
@@ -157,6 +158,11 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
             "target_xyz": target.tolist(),
             "change_source": "commanded_segment" if model.commanded_source_seen else "kinematic_detector",
             "commanded_segment_index": model.commanded_segment_index,
+            "commanded_trajectory_sha256": (
+                hashlib.sha256(json.dumps(segment_spec, sort_keys=True).encode()).hexdigest()
+                if segment_spec is not None
+                else None
+            ),
             "change_point": bool(model.pending_change_event is not None),
             "detector_change_point": event.changed,
             "change_angle_deg": logged_event.direction_deg,

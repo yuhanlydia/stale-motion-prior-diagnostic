@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from stale_motion_prior.change import commanded_segment_index
+from stale_motion_prior.change import commanded_segment_index, commanded_segment_spec
 
 
 class Env:
@@ -37,3 +37,16 @@ def test_matches_distinct_wrappers_for_same_named_actor():
     wrapped = Actor()
     tasks = [{"type": "extended_segmented", "component": SimpleNamespace(entity=wrapped), "current_segment_idx": 1}]
     assert commanded_segment_index(Env(target, tasks)) == 1
+
+
+def test_serializes_commanded_trajectory():
+    target = object()
+    tasks = [{
+        "type": "extended_segmented",
+        "component": SimpleNamespace(entity=target),
+        "current_segment_idx": 0,
+        "segments": [{"type": "velocity", "duration": 1.5, "velocity": [1, 2, 3], "ignored": object()}],
+    }]
+    assert commanded_segment_spec(Env(target, tasks)) == [
+        {"type": "velocity", "duration": 1.5, "velocity": [1, 2, 3]}
+    ]
