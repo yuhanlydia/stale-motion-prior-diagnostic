@@ -37,6 +37,11 @@ def main() -> int:
     parser.add_argument("--logs", type=Path, default=Path("runs/logs"))
     parser.add_argument("--grace-seconds", type=float, default=30.0)
     args = parser.parse_args()
+    # Child commands may run in a different cwd (DOMINO).  All artifact paths
+    # passed through the environment must therefore be absolute.
+    args.queue = args.queue.resolve()
+    args.journal = args.journal.resolve()
+    args.logs = args.logs.resolve()
     rows = [json.loads(line) for line in args.queue.read_text().splitlines() if line.strip()]
     completed = set()
     if args.journal.exists():
