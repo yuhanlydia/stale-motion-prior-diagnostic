@@ -16,8 +16,16 @@ def commanded_segment_task(task_env: Any) -> dict[str, Any] | None:
         actor = task_env.get_dynamic_motion_config()["target_actor"]
     except (AttributeError, KeyError, TypeError):
         return None
+    supported = {
+        "velocity",
+        "extended_velocity",
+        "trajectory",
+        "extended_trajectory",
+        "segmented",
+        "extended_segmented",
+    }
     for task in getattr(task_env, "active_kinematic_tasks", ()):
-        if task.get("type") not in {"segmented", "extended_segmented"}:
+        if task.get("type") not in supported:
             continue
         component = task.get("component")
         entity = getattr(component, "entity", None)
@@ -35,13 +43,15 @@ def commanded_segment_task(task_env: Any) -> dict[str, Any] | None:
 def commanded_segment_index(task_env: Any) -> int | None:
     """Read DOMINO's ground-truth regime for an active Level-3 target."""
     task = commanded_segment_task(task_env)
-    return None if task is None else int(task["current_segment_idx"])
+    if task is None:
+        return None
+    return int(task.get("current_segment_idx", 0))
 
 
 def commanded_segment_spec(task_env: Any) -> list[dict[str, Any]] | None:
     """Return the immutable commanded trajectory parameters in JSON form."""
     task = commanded_segment_task(task_env)
-    if task is None:
+    if task is None or "segments" not in task:
         return None
     fields = ("type", "duration", "start_pos", "end_pos", "velocity", "poly_x", "poly_y")
     result: list[dict[str, Any]] = []

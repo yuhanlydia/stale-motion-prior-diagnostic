@@ -22,10 +22,11 @@ def test_reads_target_commanded_segment():
     assert commanded_segment_index(Env(target, tasks)) == 2
 
 
-def test_returns_none_for_non_segmented_motion():
+def test_stationary_commanded_regime_for_non_segmented_motion():
     target = object()
     tasks = [{"type": "extended_velocity", "component": SimpleNamespace(entity=target)}]
-    assert commanded_segment_index(Env(target, tasks)) is None
+    assert commanded_segment_index(Env(target, tasks)) == 0
+    assert commanded_segment_spec(Env(target, tasks)) is None
 
 
 def test_matches_distinct_wrappers_for_same_named_actor():
