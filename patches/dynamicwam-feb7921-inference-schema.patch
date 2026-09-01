@@ -1,0 +1,14 @@
+diff --git a/src/dynamicwam/inference/model_loader.py b/src/dynamicwam/inference/model_loader.py
+index 7530cfb..f655f7a 100644
+--- a/src/dynamicwam/inference/model_loader.py
++++ b/src/dynamicwam/inference/model_loader.py
+@@ -315,6 +315,9 @@ def build_runtime_from_config(
+         config,
+         {
+             "checkpoint_path",
++            "checkpoint_artifact_id",
++            "checkpoint_manifest",
++            "external_assets_manifest",
+             "wan_root",
+             "normalization_epsilon",
+             "device",

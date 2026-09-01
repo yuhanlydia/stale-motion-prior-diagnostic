@@ -72,7 +72,7 @@ class DiagnosticDeployModel:
         self.stepper: NativeStepper | None = None
         self.pending: deque[np.ndarray] = deque()
         self.query = 0
-        self.last_event = None
+        self.pending_change_event = None
 
     def bind_env(self, env: Any) -> None:
         if self.stepper is None or self.stepper.env is not env:
@@ -89,6 +89,7 @@ class DiagnosticDeployModel:
         self.detector.reset()
         self.policy.reset()
         self.query = 0
+        self.pending_change_event = None
 
 
 def get_model(usr_args: dict[str, Any]) -> DiagnosticDeployModel:
@@ -109,7 +110,8 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
         pre_grasp=not _is_grasped(TASK_ENV),
         in_workspace=_workspace_ok(TASK_ENV, target),
     )
-    model.last_event = event
+    if event.changed:
+        model.pending_change_event = event
     model.history.push(head_camera_frame(observation), simulator_time_seconds=now, change_point=event.changed)
     if not model.pending:
         motion, intervention = model.history.observation()
@@ -123,17 +125,19 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
         }
         actions = model.policy.sample(packet)
         model.pending.extend(actions)
+        logged_event = model.pending_change_event or event
         model.logger.write({
             "query": model.query,
             "simulator_time": now,
             "target_xyz": target.tolist(),
-            "change_point": event.changed,
-            "change_angle_deg": event.direction_deg,
-            "speed_ratio": event.speed_ratio,
-            "target_speed": event.speed,
+            "change_point": bool(model.pending_change_event is not None),
+            "change_angle_deg": logged_event.direction_deg,
+            "speed_ratio": logged_event.speed_ratio,
+            "target_speed": logged_event.speed,
             "pre_grasp": not _is_grasped(TASK_ENV),
             **intervention,
         })
+        model.pending_change_event = None
         model.query += 1
     if model.stepper is None:
         raise RuntimeError("environment not bound")
@@ -142,4 +146,3 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
 
 def reset_model(model: DiagnosticDeployModel) -> None:
     model.finish_episode()
-

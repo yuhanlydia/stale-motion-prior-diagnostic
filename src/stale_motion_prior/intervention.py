@@ -42,6 +42,7 @@ class HistoryIntervention:
         self._stale_packet: Any | None = None
         self._stale_remaining = 0
         self._latest: tuple[np.ndarray, float] | None = None
+        self._change_reset_pending = False
 
     def reset_episode(self) -> None:
         self.buffer.reset()
@@ -49,11 +50,13 @@ class HistoryIntervention:
         self._stale_packet = None
         self._stale_remaining = 0
         self._latest = None
+        self._change_reset_pending = False
 
     def push(self, frame: np.ndarray, *, simulator_time_seconds: float, change_point: bool) -> None:
         """Push every simulator/action observation and apply true-change resets."""
         if self.config.mode is Mode.RESET_CHANGE and change_point:
             self.buffer.reset()
+            self._change_reset_pending = True
         if self.config.mode is Mode.STALE_HOLD and change_point:
             try:
                 self._stale_packet = self.buffer.observation()
@@ -82,12 +85,14 @@ class HistoryIntervention:
         packet = self._stale_packet if stale_applied else fresh
         if stale_applied:
             self._stale_remaining -= 1
-        return packet, {
+        metadata = {
             "history_mode": mode.value,
-            "history_reset": bool(random_reset or short_reset),
+            "history_reset": bool(random_reset or short_reset or self._change_reset_pending),
             "stale_applied": stale_applied,
             "stale_queries_remaining": self._stale_remaining,
         }
+        self._change_reset_pending = False
+        return packet, metadata
 
     def update(
         self,

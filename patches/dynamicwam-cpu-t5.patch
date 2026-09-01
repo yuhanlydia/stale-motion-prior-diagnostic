@@ -1,0 +1,24 @@
+diff --git a/src/dynamicwam/inference/model_loader.py b/src/dynamicwam/inference/model_loader.py
+--- a/src/dynamicwam/inference/model_loader.py
++++ b/src/dynamicwam/inference/model_loader.py
+@@ -281,7 +281,7 @@ def _build_t5_encoder(config: dict[str, Any], device: str) -> T5EncoderModel:
+     return T5EncoderModel(
+         text_len=512,
+         dtype=torch.bfloat16,
+-        device=device,
++        device="cpu",
+         checkpoint_path=str(wan_root / "models_t5_umt5-xxl-enc-bf16.pth"),
+         tokenizer_path=str(wan_root / "google" / "umt5-xxl"),
+     )
+diff --git a/src/dynamicwam/inference/runner.py b/src/dynamicwam/inference/runner.py
+--- a/src/dynamicwam/inference/runner.py
++++ b/src/dynamicwam/inference/runner.py
+@@ -64,7 +64,9 @@ class DynamicWAMRunner:
+         if self.cached_text_embeddings is not None:
+             return self.cached_text_embeddings
+         instruction = f"{self.runtime.scene_prefix}{self.current_instruction}"
+-        encoded = self.runtime.t5_encoder([instruction], self.device)
++        encoded = self.runtime.t5_encoder(
++            [instruction], self.runtime.t5_encoder.device
++        )
+         if isinstance(encoded, torch.Tensor):

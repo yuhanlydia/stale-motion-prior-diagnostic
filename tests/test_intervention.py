@@ -35,3 +35,12 @@ def test_stale_hold_freezes_motion_for_two_queries():
     assert first.values == second.values == (1,)
     assert fresh.values == (1, 2, 3, 4)
 
+
+def test_change_reset_is_latched_until_policy_query():
+    intervention = HistoryIntervention(Buffer, InterventionConfig(mode=Mode.RESET_CHANGE))
+    intervention.push(np.array([1]), simulator_time_seconds=1, change_point=False)
+    intervention.push(np.array([2]), simulator_time_seconds=2, change_point=True)
+    intervention.push(np.array([3]), simulator_time_seconds=3, change_point=False)
+    packet, metadata = intervention.observation()
+    assert packet.values == (2, 3)
+    assert metadata["history_reset"]
