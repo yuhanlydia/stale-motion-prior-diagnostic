@@ -63,6 +63,7 @@ class DiagnosticDeployModel:
         self.query = 0
         self.pending_change_event = None
         self.commanded_segment_index: int | None = None
+        self.commanded_source_seen = False
         self.policy_rng_seed: int | None = None
 
     def bind_env(self, env: Any) -> None:
@@ -87,6 +88,7 @@ class DiagnosticDeployModel:
         self.query = 0
         self.pending_change_event = None
         self.commanded_segment_index = None
+        self.commanded_source_seen = False
         self.policy_rng_seed = None
 
 
@@ -115,8 +117,9 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
         and segment_index != model.commanded_segment_index
     )
     if segment_index is not None:
+        model.commanded_source_seen = True
         model.commanded_segment_index = segment_index
-    change_point = commanded_change if segment_index is not None else event.changed
+    change_point = commanded_change if model.commanded_source_seen else event.changed
     if change_point:
         model.pending_change_event = event
     model.history.push(head_camera_frame(observation), simulator_time_seconds=now, change_point=change_point)
@@ -143,8 +146,8 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
             "query": model.query,
             "simulator_time": now,
             "target_xyz": target.tolist(),
-            "change_source": "commanded_segment" if segment_index is not None else "kinematic_detector",
-            "commanded_segment_index": segment_index,
+            "change_source": "commanded_segment" if model.commanded_source_seen else "kinematic_detector",
+            "commanded_segment_index": model.commanded_segment_index,
             "change_point": bool(model.pending_change_event is not None),
             "detector_change_point": event.changed,
             "change_angle_deg": logged_event.direction_deg,
