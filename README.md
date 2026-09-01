@@ -100,8 +100,13 @@ python scripts/run_budget.py runs/smoke_commands.jsonl --hours 10
 ```
 
 Run `python scripts/preflight.py` first. A CUDA-visible container is not enough:
-DOMINO/SAPIEN also requires `NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics`
-and an NVIDIA Vulkan physical device. DOMINO's render probe can print
+DOMINO/SAPIEN also requires an NVIDIA Vulkan physical device. A container
+normally exposes it with `NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics`.
+The preflight trusts a successful physical-device probe even when that
+declarative variable is incomplete. If `libGLX_nvidia.so` is present but the
+ICD cannot resolve `vkCreateInstance`, install the GLVND runtime (`libegl1`,
+`libglvnd0`, and `libopengl0` on Ubuntu) before rebuilding the container.
+DOMINO's render probe can print
 `Render Error` and exit with code zero, so the budget runner additionally
 requires a nonempty query log and `SYNC-EPISODE-SUMMARY` before marking a row
 complete.
