@@ -7,6 +7,7 @@ can use the exact same DynamicWAM deploy YAML and checkpoint.
 from __future__ import annotations
 
 from collections import deque
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -129,8 +130,9 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
     model.history.push(head_camera_frame(observation), simulator_time_seconds=now, change_point=change_point)
     if not model.pending:
         motion, intervention = model.history.observation()
+        composite_frame = composite_robotwin_frame(observation, model.policy.runtime.observation_config)
         packet = {
-            "frame": composite_robotwin_frame(observation, model.policy.runtime.observation_config),
+            "frame": composite_frame,
             "state": extract_state(observation),
             "flow_frames": motion.flow_rgb,
             "motion_features": motion.motion_features,
@@ -147,6 +149,9 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
             "requested_start_seed": int(os.environ.get("SMP_REQUESTED_SEED", "-1")),
             "seed": int(getattr(TASK_ENV, "_smp_episode_seed")),
             "policy_rng_seed": model.policy_rng_seed,
+            "frame_sha256": hashlib.sha256(np.ascontiguousarray(composite_frame).tobytes()).hexdigest(),
+            "action_chunk_sha256": hashlib.sha256(np.ascontiguousarray(actions).tobytes()).hexdigest(),
+            "first_action": np.asarray(actions[0]).tolist(),
             "query": model.query,
             "simulator_time": now,
             "target_xyz": target.tolist(),
