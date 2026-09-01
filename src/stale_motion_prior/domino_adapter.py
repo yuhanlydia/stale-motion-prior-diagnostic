@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import torch
 
 from dynamicwam.runtime.ciwam.adapters.domino.composite import (
     composite_robotwin_frame,
@@ -23,7 +24,7 @@ from dynamicwam.runtime.ciwam.execution import NativeStepper
 from dynamicwam.runtime.ciwam.flow import HeadFlowBuffer
 from dynamicwam.runtime.ciwam.wam.policy import DynamicWAMPolicy
 
-from .change import ChangeDetector, ChangeDetectorConfig
+from .change import ChangeDetector, ChangeDetectorConfig, commanded_segment_index
 from .intervention import HistoryIntervention, InterventionConfig, Mode
 from .logging import JsonlLogger
 from .geometry import ee_geometry, is_grasped
@@ -61,9 +62,16 @@ class DiagnosticDeployModel:
         self.pending: deque[np.ndarray] = deque()
         self.query = 0
         self.pending_change_event = None
+        self.commanded_segment_index: int | None = None
+        self.policy_rng_seed: int | None = None
 
     def bind_env(self, env: Any) -> None:
         if self.stepper is None or self.stepper.env is not env:
+            actual_seed = int(getattr(env, "_smp_episode_seed"))
+            self.policy_rng_seed = 1_000_003 + actual_seed
+            torch.manual_seed(self.policy_rng_seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(self.policy_rng_seed)
             self.stepper = NativeStepper(env, action_interval_seconds=self.policy.runtime.action_interval_seconds)
             self.policy.set_instruction(env.get_instruction())
 
@@ -78,6 +86,8 @@ class DiagnosticDeployModel:
         self.policy.reset()
         self.query = 0
         self.pending_change_event = None
+        self.commanded_segment_index = None
+        self.policy_rng_seed = None
 
 
 def get_model(usr_args: dict[str, Any]) -> DiagnosticDeployModel:
@@ -98,9 +108,18 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
         pre_grasp=not is_grasped(TASK_ENV),
         in_workspace=_workspace_ok(TASK_ENV, target),
     )
-    if event.changed:
+    segment_index = commanded_segment_index(TASK_ENV)
+    commanded_change = (
+        segment_index is not None
+        and model.commanded_segment_index is not None
+        and segment_index != model.commanded_segment_index
+    )
+    if segment_index is not None:
+        model.commanded_segment_index = segment_index
+    change_point = commanded_change if segment_index is not None else event.changed
+    if change_point:
         model.pending_change_event = event
-    model.history.push(head_camera_frame(observation), simulator_time_seconds=now, change_point=event.changed)
+    model.history.push(head_camera_frame(observation), simulator_time_seconds=now, change_point=change_point)
     if not model.pending:
         motion, intervention = model.history.observation()
         packet = {
@@ -120,10 +139,14 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
             "level": int(os.environ.get("SMP_LEVEL", "-1")),
             "requested_start_seed": int(os.environ.get("SMP_REQUESTED_SEED", "-1")),
             "seed": int(getattr(TASK_ENV, "_smp_episode_seed")),
+            "policy_rng_seed": model.policy_rng_seed,
             "query": model.query,
             "simulator_time": now,
             "target_xyz": target.tolist(),
+            "change_source": "commanded_segment" if segment_index is not None else "kinematic_detector",
+            "commanded_segment_index": segment_index,
             "change_point": bool(model.pending_change_event is not None),
+            "detector_change_point": event.changed,
             "change_angle_deg": logged_event.direction_deg,
             "speed_ratio": logged_event.speed_ratio,
             "target_speed": logged_event.speed,

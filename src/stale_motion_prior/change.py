@@ -5,8 +5,31 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 import math
+from typing import Any
 
 import numpy as np
+
+
+def commanded_segment_index(task_env: Any) -> int | None:
+    """Read DOMINO's ground-truth regime for an active Level-3 target."""
+    try:
+        actor = task_env.get_dynamic_motion_config()["target_actor"]
+    except (AttributeError, KeyError, TypeError):
+        return None
+    for task in getattr(task_env, "active_kinematic_tasks", ()):
+        if task.get("type") not in {"segmented", "extended_segmented"}:
+            continue
+        component = task.get("component")
+        entity = getattr(component, "entity", None)
+        same_name = (
+            entity is not None
+            and callable(getattr(entity, "get_name", None))
+            and callable(getattr(actor, "get_name", None))
+            and entity.get_name() == actor.get_name()
+        )
+        if entity is actor or same_name:
+            return int(task["current_segment_idx"])
+    return None
 
 
 @dataclass(frozen=True)
