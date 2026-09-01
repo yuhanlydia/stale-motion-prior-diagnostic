@@ -118,7 +118,8 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
         model.logger.write({
             "task": os.environ.get("SMP_TASK", "unknown"),
             "level": int(os.environ.get("SMP_LEVEL", "-1")),
-            "seed": int(os.environ.get("SMP_SEED", "-1")),
+            "requested_start_seed": int(os.environ.get("SMP_REQUESTED_SEED", "-1")),
+            "seed": int(getattr(TASK_ENV, "_smp_episode_seed")),
             "query": model.query,
             "simulator_time": now,
             "target_xyz": target.tolist(),

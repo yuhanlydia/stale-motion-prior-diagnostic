@@ -1,0 +1,12 @@
+diff --git a/envs/_base_task.py b/envs/_base_task.py
+--- a/envs/_base_task.py
++++ b/envs/_base_task.py
+@@ -57,6 +57,7 @@ class Base_Task(Base_Env):
+         ta.setup_logging("CRITICAL")  # hide logging
+         
+         seed = kwags.get("seed", 0)
++        self._smp_episode_seed = int(seed)
+         np.random.seed(seed)
+         torch.manual_seed(seed)
+         random.seed(seed)
+

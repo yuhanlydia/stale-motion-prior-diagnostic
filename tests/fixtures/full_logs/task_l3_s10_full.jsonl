@@ -1,0 +1,5 @@
+{"task":"task","level":3,"requested_start_seed":10,"seed":11,"query":0,"change_point":false,"pre_grasp":true}
+{"task":"task","level":3,"requested_start_seed":10,"seed":11,"query":1,"change_point":true,"pre_grasp":true}
+{"task":"task","level":3,"requested_start_seed":10,"seed":11,"query":2,"change_point":false,"pre_grasp":true}
+{"task":"task","level":3,"requested_start_seed":10,"seed":11,"query":3,"change_point":false,"pre_grasp":true}
+{"task":"task","level":3,"requested_start_seed":10,"seed":11,"query":4,"change_point":false,"pre_grasp":true}

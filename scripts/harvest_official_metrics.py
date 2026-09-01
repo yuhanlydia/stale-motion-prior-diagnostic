@@ -38,12 +38,13 @@ def main() -> int:
         if summary.get("total_episodes") != 1 or len(episodes) != 1:
             raise RuntimeError(f"expected exactly one episode under {result_root}")
         episode = episodes[0]
-        if int(episode["seed"]) != int(row["seed"]):
-            raise RuntimeError(f"reported seed mismatch for {result_root}: {episode['seed']} != {row['seed']}")
+        if int(episode["seed"]) < int(row["seed"]):
+            raise RuntimeError(f"reported seed precedes requested start for {result_root}: {episode['seed']} < {row['seed']}")
         harvested.append({
             "task": row["task"],
             "level": int(row["level"]),
-            "seed": int(row["seed"]),
+            "requested_start_seed": int(row["seed"]),
+            "seed": int(episode["seed"]),
             "condition": row["condition"],
             "sr": 100.0 if bool(episode["success"]) else 0.0,
             "ms": float(episode["manipulation_score"]),
@@ -52,6 +53,17 @@ def main() -> int:
             "metrics_path": str(metrics_paths[0]),
             "episodes_path": str(episode_paths[0]),
         })
+    paired_seeds = {}
+    for row in harvested:
+        identity = (row["task"], row["level"], row["requested_start_seed"])
+        paired_seeds.setdefault(identity, set()).add(row["seed"])
+    mismatched = {
+        identity: sorted(seeds)
+        for identity, seeds in paired_seeds.items()
+        if len(seeds) != 1
+    }
+    if mismatched:
+        raise RuntimeError(f"conditions resolved to different simulator seeds: {mismatched}")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in harvested), encoding="utf-8")
     missing_path = args.output.with_suffix(".missing.json")
@@ -62,4 +74,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

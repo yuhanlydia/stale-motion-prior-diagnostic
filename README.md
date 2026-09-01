@@ -128,6 +128,14 @@ schedule. It reads only task/level/seed, episode length, pre-grasp change flags,
 and query indices—never outcomes. `scripts/summarize_mechanism.py` then computes
 per-change distance AUC and recovery lag from completed condition logs.
 
+Use `scripts/filter_queue.py` to run the FULL audit phase first. Then build the
+schedule and inject it with `scripts/apply_random_reset_schedule.py`; an absent
+task/level/seed schedule is a hard error, so RANDOM_RESET can never silently run
+as a no-op. DOMINO may reject an infeasible requested raw seed and advance. The
+small recorded patch stores the actual setup seed on the task environment;
+query logs and official harvesting pair on that simulator-reported seed while
+retaining `requested_start_seed` as provenance.
+
 ## Analysis
 
 Episode result JSONL must contain `task`, `level`, `seed`, `condition`, `sr`,

@@ -62,7 +62,7 @@ def main() -> int:
             "SMP_LOG": str(query_log),
             "SMP_TASK": str(row["task"]),
             "SMP_LEVEL": str(row["level"]),
-            "SMP_SEED": str(row["seed"]),
+            "SMP_REQUESTED_SEED": str(row["seed"]),
         })
         if row.get("random_reset_queries"):
             env["SMP_RANDOM_RESETS"] = ",".join(map(str, row["random_reset_queries"]))
