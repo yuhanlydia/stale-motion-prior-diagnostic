@@ -17,6 +17,29 @@ import subprocess
 import time
 
 
+def eval_output_root(command: list[str]) -> Path | None:
+    """Read eval_output_root from the YAML passed to eval_policy.py.
+
+    Keeping this tiny parser dependency-free also makes the budget runner usable
+    from the repository's lightweight control environment.
+    """
+    try:
+        config = Path(command[command.index("--config") + 1])
+    except (ValueError, IndexError):
+        return None
+    if not config.is_file():
+        return None
+    for line in config.read_text(encoding="utf-8").splitlines():
+        if line.startswith("eval_output_root:"):
+            value = line.split(":", 1)[1].strip().strip("'\"")
+            return Path(value).expanduser().resolve() if value else None
+    return None
+
+
+def metric_files(root: Path | None) -> set[Path]:
+    return set() if root is None or not root.exists() else set(root.rglob("*_metrics.json"))
+
+
 def append(path: Path, value: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
@@ -69,6 +92,8 @@ def main() -> int:
             "SMP_LEVEL": str(row["level"]),
             "SMP_REQUESTED_SEED": str(row["seed"]),
         })
+        output_root = eval_output_root(command)
+        metrics_before = metric_files(output_root)
         if row.get("random_reset_queries"):
             env["SMP_RANDOM_RESETS"] = ",".join(map(str, row["random_reset_queries"]))
         started = time.time()
@@ -93,6 +118,7 @@ def main() -> int:
         log_text = log_path.read_text(encoding="utf-8", errors="replace")
         query_ok = query_log.is_file() and query_log.stat().st_size > 0
         summary_ok = "SYNC-EPISODE-SUMMARY" in log_text
+        new_metrics = sorted(str(path) for path in metric_files(output_root) - metrics_before)
         complete = process.returncode == 0 and query_ok and summary_ok
         failure_reason = None
         if not complete:
@@ -102,7 +128,7 @@ def main() -> int:
                 "missing_episode_summary" if not summary_ok else
                 f"returncode_{process.returncode}"
             )
-        append(args.journal, {**{k: row[k] for k in ("task", "level", "seed", "condition")}, "status": "complete" if complete else "failed", "failure_reason": failure_reason, "returncode": process.returncode, "started_unix": started, "finished_unix": time.time(), "log": str(log_path), "query_log": str(query_log)})
+        append(args.journal, {**{k: row[k] for k in ("task", "level", "seed", "condition")}, "status": "complete" if complete else "failed", "failure_reason": failure_reason, "returncode": process.returncode, "started_unix": started, "finished_unix": time.time(), "log": str(log_path), "query_log": str(query_log), "official_metrics": new_metrics})
         if time.monotonic() >= deadline:
             break
     return 0
