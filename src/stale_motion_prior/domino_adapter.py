@@ -26,6 +26,7 @@ from dynamicwam.runtime.ciwam.wam.policy import DynamicWAMPolicy
 from .change import ChangeDetector, ChangeDetectorConfig
 from .intervention import HistoryIntervention, InterventionConfig, Mode
 from .logging import JsonlLogger
+from .geometry import ee_geometry, is_grasped
 
 
 def _target_xyz(task_env: Any) -> np.ndarray:
@@ -42,19 +43,6 @@ def _workspace_ok(task_env: Any, xyz: np.ndarray) -> bool:
         except TypeError:
             pass
     return bool(np.isfinite(xyz).all())
-
-
-def _is_grasped(task_env: Any) -> bool:
-    for name in ("is_grasped", "target_grasped", "grasped"):
-        value = getattr(task_env, name, False)
-        if callable(value):
-            try:
-                value = value()
-            except TypeError:
-                continue
-        if isinstance(value, (bool, np.bool_)):
-            return bool(value)
-    return False
 
 
 class DiagnosticDeployModel:
@@ -107,7 +95,7 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
         query=model.query,
         position_xyz=target,
         time_seconds=now,
-        pre_grasp=not _is_grasped(TASK_ENV),
+        pre_grasp=not is_grasped(TASK_ENV),
         in_workspace=_workspace_ok(TASK_ENV, target),
     )
     if event.changed:
@@ -126,6 +114,7 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
         actions = model.policy.sample(packet)
         model.pending.extend(actions)
         logged_event = model.pending_change_event or event
+        geometry = ee_geometry(TASK_ENV, target)
         model.logger.write({
             "query": model.query,
             "simulator_time": now,
@@ -134,7 +123,8 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
             "change_angle_deg": logged_event.direction_deg,
             "speed_ratio": logged_event.speed_ratio,
             "target_speed": logged_event.speed,
-            "pre_grasp": not _is_grasped(TASK_ENV),
+            "pre_grasp": not is_grasped(TASK_ENV),
+            **geometry,
             **intervention,
         })
         model.pending_change_event = None

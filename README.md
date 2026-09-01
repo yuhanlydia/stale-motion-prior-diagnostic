@@ -160,9 +160,10 @@ method until Gate-0 survives.
 - A 16GB RTX A4000 may be below the practical memory requirement of the
   released video-action model. Checkpoint verification is CPU-safe; rollout
   OOM is a Gate-A infrastructure failure, not evidence against the hypothesis.
-- Generic target pose is available through DOMINO's dynamic-motion config.
-  Gripper pose extraction is embodiment-specific and must be validated before
-  distance AUC/recovery lag are treated as complete.
+- Target pose comes from DOMINO's dynamic-motion config. Left/right EE poses
+  come from the benchmark robot API; telemetry records both distances and uses
+  their minimum as the policy-agnostic approach distance. First target-gripper
+  contact latches the pre-grasp eligibility false.
 
 ### RoboTwin embodiments archive bug
 
