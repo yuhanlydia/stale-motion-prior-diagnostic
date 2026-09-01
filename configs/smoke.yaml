@@ -1,0 +1,17 @@
+experiment: stale_motion_prior_gate0_smoke
+tasks: [grab_roller, move_stapler_pad, place_mouse_pad]
+levels: [1, 3]
+seeds: [137, 138, 139, 140, 141, 142, 143, 144, 145, 146]
+conditions: [full, reset_change, random_reset, stale_hold]
+detector:
+  direction_deg: 45.0
+  speed_ratio: 0.5
+  minimum_speed: 0.001
+  median_window: 4
+  cooldown_queries: 2
+stale_queries: 2
+post_change_horizon: 3
+bootstrap_draws: 10000
+wall_time_hours: 10
+stop_if_no_level_interaction: true
+
