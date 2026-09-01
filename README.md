@@ -137,6 +137,11 @@ and `ms`. Then:
 smp-analyze runs/episode_results.jsonl --draws 10000
 ```
 
+Generate that JSONL from the benchmark's authoritative `_metrics.json` and
+`_episodes_detail.json` using `scripts/harvest_official_metrics.py`. It requires
+exactly one reported episode and verifies the simulator-reported seed against
+the paired queue; missing or ambiguous result directories are a hard failure.
+
 Pilot inference uses paired episode bootstrap. The 35-task confirmatory run
 must use task-balanced hierarchical bootstrap (resample tasks, then paired
 seeds within task). Report delta SR, delta MS, delta distance AUC, and delta

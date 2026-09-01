@@ -90,7 +90,10 @@ class ChangeDetector:
             )
             ratio = abs(speed - previous_speed) / (baseline + self.config.speed_epsilon)
             if eligible:
-                direction_hit = angle > self.config.direction_deg
+                direction_hit = (
+                    previous_speed >= self.config.minimum_speed
+                    and angle > self.config.direction_deg
+                )
                 speed_hit = ratio > self.config.speed_ratio
                 changed = direction_hit or speed_hit
                 if changed:
@@ -102,4 +105,3 @@ class ChangeDetector:
         self._last_velocity = velocity
         self._last_position, self._last_time = position.copy(), now
         return ChangeEvent(query, changed, eligible, angle, ratio, speed, reason)
-

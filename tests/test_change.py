@@ -21,3 +21,11 @@ def test_stationary_linear_motion_does_not_trigger():
     ]
     assert not any(event.changed for event in events)
 
+
+def test_motion_start_is_speed_change_not_direction_change():
+    detector = ChangeDetector()
+    detector.update(query=0, position_xyz=np.array([0.0, 0, 0]), time_seconds=0.0)
+    detector.update(query=1, position_xyz=np.array([0.0, 0, 0]), time_seconds=1.0)
+    event = detector.update(query=2, position_xyz=np.array([1.0, 0, 0]), time_seconds=2.0)
+    assert event.changed
+    assert event.reason == "speed"
