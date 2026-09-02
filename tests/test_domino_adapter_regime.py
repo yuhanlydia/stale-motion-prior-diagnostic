@@ -25,7 +25,9 @@ def test_reads_target_commanded_segment():
 def test_stationary_commanded_regime_for_non_segmented_motion():
     target = object()
     tasks = [{"type": "extended_velocity", "component": SimpleNamespace(entity=target)}]
-    assert commanded_segment_index(Env(target, tasks)) == 0
+    # Non-segmented motion has no commanded regime index; the detector must
+    # use simulator kinematics instead of fabricating a stationary segment.
+    assert commanded_segment_index(Env(target, tasks)) is None
     assert commanded_segment_spec(Env(target, tasks)) is None
 
 
