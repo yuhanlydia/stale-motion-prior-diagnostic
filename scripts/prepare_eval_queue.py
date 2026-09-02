@@ -26,6 +26,11 @@ def main() -> int:
     parser.add_argument("--levels", nargs="+", type=int, default=[1, 3])
     parser.add_argument("--seeds", nargs="+", type=int, required=True)
     parser.add_argument("--conditions", nargs="+", choices=CONDITIONS, default=list(CONDITIONS))
+    parser.add_argument(
+        "--policy-name",
+        default="ciwam.adapters.domino.deploy_policy_sync_flow",
+        help="Policy adapter import path to place in generated configs.",
+    )
     args = parser.parse_args()
     root = args.dynamicwam_root.resolve()
     domino = root / "external" / "DOMINO"
@@ -62,7 +67,7 @@ def main() -> int:
                     label = f"{task}_l{level}_s{seed}_{condition}"
                     trajectory_snapshot = output / "trajectory_snapshots" / f"{task}_l{level}_requested_s{seed}.pkl"
                     run_config = {
-                        "policy_name": "ciwam.adapters.domino.deploy_policy_sync_flow",
+                        "policy_name": args.policy_name,
                         "task_name": task,
                         "task_config": task_config_names[level],
                         "ckpt_setting": f"dynamicwam-full-{condition}",
