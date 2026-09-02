@@ -31,6 +31,10 @@ def main() -> int:
         default="ciwam.adapters.domino.deploy_policy_sync_flow",
         help="Policy adapter import path to place in generated configs.",
     )
+    parser.add_argument(
+        "--trajectory-root", type=Path,
+        help="Optional root containing frozen trajectory_snapshots to reuse.",
+    )
     args = parser.parse_args()
     root = args.dynamicwam_root.resolve()
     domino = root / "external" / "DOMINO"
@@ -50,6 +54,7 @@ def main() -> int:
         write_yaml(domino / "task_config" / f"{name}.yml", config)
         task_config_names[level] = name
     output = args.output_root.resolve()
+    trajectory_root = (args.trajectory_root or output).resolve()
     configs = output / "configs"
     rows = []
     pythonpath = ":".join((
@@ -65,7 +70,7 @@ def main() -> int:
             for seed in args.seeds:
                 for condition in args.conditions:
                     label = f"{task}_l{level}_s{seed}_{condition}"
-                    trajectory_snapshot = output / "trajectory_snapshots" / f"{task}_l{level}_requested_s{seed}.pkl"
+                    trajectory_snapshot = trajectory_root / "trajectory_snapshots" / f"{task}_l{level}_requested_s{seed}.pkl"
                     run_config = {
                         "policy_name": args.policy_name,
                         "task_name": task,
