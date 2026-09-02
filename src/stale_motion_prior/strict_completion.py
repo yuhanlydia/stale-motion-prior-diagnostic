@@ -7,14 +7,16 @@ from typing import Sequence
 
 
 def completion_status(
-    *, returncode: int, query_log: Path, log_text: str, new_metrics: Sequence[str]
+    *, returncode: int, query_log: Path, log_text: str, new_metrics: Sequence[str],
+    require_diagnostic_telemetry: bool = True,
 ) -> tuple[bool, str | None]:
     if returncode != 0:
         return False, f"returncode_{returncode}"
-    if not query_log.is_file() or query_log.stat().st_size <= 0:
-        return False, "missing_query_log"
-    if "SYNC-EPISODE-SUMMARY" not in log_text:
-        return False, "missing_episode_summary"
+    if require_diagnostic_telemetry:
+        if not query_log.is_file() or query_log.stat().st_size <= 0:
+            return False, "missing_query_log"
+        if "SYNC-EPISODE-SUMMARY" not in log_text:
+            return False, "missing_episode_summary"
     if len(new_metrics) == 0:
         return False, "missing_official_metrics"
     if len(new_metrics) != 1:

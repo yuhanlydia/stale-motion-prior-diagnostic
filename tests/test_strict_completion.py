@@ -25,3 +25,15 @@ def test_completion_accepts_one_metric_and_required_telemetry(tmp_path: Path):
     ok, reason = completion_status(returncode=0, query_log=query_log, log_text='SYNC-EPISODE-SUMMARY {}', new_metrics=['a_metrics.json'])
     assert ok
     assert reason is None
+
+
+def test_official_baseline_allows_missing_diagnostic_telemetry(tmp_path: Path):
+    ok, reason = completion_status(
+        returncode=0,
+        query_log=tmp_path / 'missing.jsonl',
+        log_text='official adapter',
+        new_metrics=['a_metrics.json'],
+        require_diagnostic_telemetry=False,
+    )
+    assert ok
+    assert reason is None

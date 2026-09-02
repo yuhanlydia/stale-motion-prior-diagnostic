@@ -55,6 +55,10 @@ def main() -> int:
     parser.add_argument('--hours', type=float, required=True)
     parser.add_argument('--journal', type=Path, default=Path('runs/journal.jsonl'))
     parser.add_argument('--logs', type=Path, default=Path('runs/logs'))
+    parser.add_argument(
+        '--official-baseline', action='store_true',
+        help='Accept uninstrumented official adapter logs; metrics remain mandatory.',
+    )
     args = parser.parse_args()
 
     rows = _read_jsonl(args.queue)
@@ -117,6 +121,7 @@ def main() -> int:
             query_log=query_log,
             log_text=log_text,
             new_metrics=new_metrics,
+            require_diagnostic_telemetry=not args.official_baseline,
         )
         _append(args.journal, {
             **{k: row[k] for k in ('task', 'level', 'seed', 'condition')},
