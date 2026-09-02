@@ -5,6 +5,13 @@ diff --git a/script/eval_policy.py b/script/eval_policy.py
  import time
 +import pickle
 @@
+     if st_seed < 0:
+         raise ValueError(f"start_seed must be non-negative, got {st_seed}")
++    snapshot_path = os.environ.get("SMP_TRAJECTORY_SNAPSHOT")
++    if snapshot_path and os.environ.get("SMP_MODE", "full") != "full":
++        with open(snapshot_path, "rb") as handle:
++            st_seed = int(pickle.load(handle)["actual_seed"])
+@@
          # Save dynamic motion info from Expert phase
          saved_dynamic_motion_info = getattr(TASK_ENV, '_saved_dynamic_motion_info', None)
 +        trajectory_snapshot = os.environ.get("SMP_TRAJECTORY_SNAPSHOT")
