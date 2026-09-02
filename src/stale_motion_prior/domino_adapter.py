@@ -15,7 +15,6 @@ from typing import Any
 
 import numpy as np
 import torch
-
 from dynamicwam.runtime.ciwam.adapters.domino.composite import (
     composite_robotwin_frame,
     extract_state,
@@ -24,18 +23,17 @@ from dynamicwam.runtime.ciwam.adapters.domino.composite import (
 from dynamicwam.runtime.ciwam.execution import NativeStepper
 from dynamicwam.runtime.ciwam.flow import HeadFlowBuffer
 from dynamicwam.runtime.ciwam.wam.policy import DynamicWAMPolicy
-
 from .change import ChangeDetector, ChangeDetectorConfig, commanded_segment_index, commanded_segment_spec
 from .intervention import HistoryIntervention, InterventionConfig, Mode
 from .logging import JsonlLogger
 from .geometry import ee_geometry, is_grasped
+from .chunk_telemetry import change_chunk_telemetry
 
 
 def _target_xyz(task_env: Any) -> np.ndarray:
     config = task_env.get_dynamic_motion_config()
     actor = config["target_actor"]
     return np.asarray(actor.get_pose().p, dtype=np.float64)
-
 
 def _workspace_ok(task_env: Any, xyz: np.ndarray) -> bool:
     checker = getattr(task_env, "is_out_of_bounds", None)
@@ -45,7 +43,6 @@ def _workspace_ok(task_env: Any, xyz: np.ndarray) -> bool:
         except TypeError:
             pass
     return bool(np.isfinite(xyz).all())
-
 
 class DiagnosticDeployModel:
     def __init__(self, usr_args: dict[str, Any]) -> None:
@@ -70,7 +67,8 @@ class DiagnosticDeployModel:
         self.commanded_segment_index: int | None = None
         self.commanded_source_seen = False
         self.policy_rng_seed: int | None = None
-
+        self.last_chunk_size: int | None = None
+        self.pending_change_telemetry: dict[str, Any] | None = None
     def bind_env(self, env: Any) -> None:
         if self.stepper is None or self.stepper.env is not env:
             actual_seed = int(getattr(env, "_smp_episode_seed"))
@@ -80,7 +78,6 @@ class DiagnosticDeployModel:
                 torch.cuda.manual_seed_all(self.policy_rng_seed)
             self.stepper = NativeStepper(env, action_interval_seconds=self.policy.runtime.action_interval_seconds)
             self.policy.set_instruction(env.get_instruction())
-
     def finish_episode(self) -> None:
         if self.stepper is not None:
             summary = self.stepper.telemetry.summary()
@@ -95,11 +92,11 @@ class DiagnosticDeployModel:
         self.commanded_segment_index = None
         self.commanded_source_seen = False
         self.policy_rng_seed = None
-
+        self.last_chunk_size = None
+        self.pending_change_telemetry = None
 
 def get_model(usr_args: dict[str, Any]) -> DiagnosticDeployModel:
     return DiagnosticDeployModel(usr_args)
-
 
 def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any]) -> None:
     model.bind_env(TASK_ENV)
@@ -128,6 +125,10 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
     change_point = commanded_change if model.commanded_source_seen else event.changed
     if change_point:
         model.pending_change_event = event
+        model.pending_change_telemetry = change_chunk_telemetry(
+            pending_actions=len(model.pending),
+            last_chunk_size=model.last_chunk_size,
+        )
     model.history.push(head_camera_frame(observation), simulator_time_seconds=now, change_point=change_point)
     if not model.pending:
         motion, intervention = model.history.observation()
@@ -141,9 +142,15 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
             "motion_acceleration_valid_mask": motion.acceleration_valid_mask,
         }
         actions = model.policy.sample(packet)
+        model.last_chunk_size = len(actions)
         model.pending.extend(actions)
         logged_event = model.pending_change_event or event
         geometry = ee_geometry(TASK_ENV, target)
+        change_telemetry = model.pending_change_telemetry or {
+            "actions_remaining_at_change": None,
+            "steps_until_next_policy_query": None,
+            "chunk_phase": None,
+        }
         model.logger.write({
             "task": os.environ.get("SMP_TASK", "unknown"),
             "level": int(os.environ.get("SMP_LEVEL", "-1")),
@@ -169,15 +176,16 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
             "speed_ratio": logged_event.speed_ratio,
             "target_speed": logged_event.speed,
             "pre_grasp": not is_grasped(TASK_ENV),
+            **change_telemetry,
             **geometry,
             **intervention,
         })
         model.pending_change_event = None
+        model.pending_change_telemetry = None
         model.query += 1
     if model.stepper is None:
         raise RuntimeError("environment not bound")
     model.stepper.execute(model.pending.popleft())
-
 
 def reset_model(model: DiagnosticDeployModel) -> None:
     model.finish_episode()

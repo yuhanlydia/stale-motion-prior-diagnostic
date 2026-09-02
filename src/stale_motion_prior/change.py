@@ -9,7 +9,6 @@ from typing import Any
 
 import numpy as np
 
-
 def commanded_segment_task(task_env: Any) -> dict[str, Any] | None:
     """Return DOMINO's active Level-3 task for the configured target."""
     try:
@@ -39,14 +38,17 @@ def commanded_segment_task(task_env: Any) -> dict[str, Any] | None:
             return task
     return None
 
-
 def commanded_segment_index(task_env: Any) -> int | None:
-    """Read DOMINO's ground-truth regime for an active Level-3 target."""
-    task = commanded_segment_task(task_env)
-    if task is None:
-        return None
-    return int(task.get("current_segment_idx", 0))
+    """Read an explicit simulator regime index when one actually exists.
 
+    Plain velocity/trajectory tasks are valid motion sources, but they are not
+    discrete regime sources unless DOMINO exposes ``current_segment_idx``.
+    Returning ``None`` keeps the kinematic detector enabled for such tasks.
+    """
+    task = commanded_segment_task(task_env)
+    if task is None or "current_segment_idx" not in task:
+        return None
+    return int(task["current_segment_idx"])
 
 def commanded_segment_spec(task_env: Any) -> list[dict[str, Any]] | None:
     """Return the immutable commanded trajectory parameters in JSON form."""
@@ -64,7 +66,6 @@ def commanded_segment_spec(task_env: Any) -> list[dict[str, Any]] | None:
             clean[key] = value.tolist() if hasattr(value, "tolist") else value
         result.append(clean)
     return result
-
 
 @dataclass(frozen=True)
 class ChangeDetectorConfig:
@@ -86,10 +87,8 @@ class ChangeEvent:
     speed: float | None
     reason: str | None
 
-
 class ChangeDetector:
     """Detect direction/speed changes from target position and simulator time."""
-
     def __init__(self, config: ChangeDetectorConfig | None = None) -> None:
         self.config = config or ChangeDetectorConfig()
         self._last_position: np.ndarray | None = None
@@ -100,7 +99,6 @@ class ChangeDetector:
 
     def reset(self) -> None:
         self.__init__(self.config)
-
     def update(
         self,
         *,
@@ -137,7 +135,7 @@ class ChangeDetector:
         )
         if self._last_velocity is not None:
             previous_speed = float(np.linalg.norm(self._last_velocity))
-            denominator = previous_speed * speed + self.config.speed_epsilon
+            denominator = max(previous_speed * speed, self.config.speed_epsilon)
             cosine = float(np.dot(self._last_velocity, velocity) / denominator)
             angle = math.degrees(math.acos(float(np.clip(cosine, -1.0, 1.0))))
             baseline = (

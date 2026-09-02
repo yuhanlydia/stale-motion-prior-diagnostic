@@ -1,0 +1,38 @@
+{
+  "hypothesis": "Truthful motion history helps under stationary dynamics but becomes a causally harmful stale prior immediately after abrupt regime changes.",
+  "primary_metric": "DOMINO Manipulation Score (MS)",
+  "secondary_metric": "DOMINO Success Rate (SR)",
+  "tasks": ["grab_roller", "move_stapler_pad", "place_mouse_pad"],
+  "levels": [1, 3],
+  "seeds": [137, 138, 139, 140, 141, 142, 143, 144, 145, 146],
+  "conditions": ["full", "reset_change", "random_reset", "stale_hold"],
+  "stale_queries": 2,
+  "change_detector": {
+    "direction_deg": 45.0,
+    "speed_ratio": 0.5,
+    "minimum_speed": 0.001,
+    "cooldown_queries": 2,
+    "primary_source": "explicit commanded segment when current_segment_idx exists; otherwise simulator-kinematic fallback"
+  },
+  "random_reset": {
+    "source": "FULL query logs only",
+    "pre_grasp_only": true,
+    "phase_matched": true,
+    "exclude_true_change_cooldown": true,
+    "outcome_blind": true,
+    "rng_seed": 20260902
+  },
+  "gates": {
+    "A_full_equivalence": "Run one L1 task x 5 seeds with official adapter and diagnostic FULL. If exact action equivalence is unavailable because the official adapter is stochastic, label diagnostic FULL as paired_full and require no systematic SR/MS discrepancy.",
+    "B_event_coverage": "On 3 L3 tasks x 10 FULL seeds, at least 70% of episodes must contain >=1 eligible pre-grasp abrupt change before first grasp/contact.",
+    "C_primary_interaction": "[(RESET_CHANGE-FULL)_L3 - (RESET_CHANGE-FULL)_L1] > 0 on paired MS with 95% CI excluding 0 for the expanded pilot; decisive smoke may proceed on positive point estimate plus consistent task-level sign.",
+    "C_l3_gain": "RESET_CHANGE-FULL > 0 on L3 MS; RANDOM_RESET must not reproduce the reset gain.",
+    "D_local_ordering": "For lower-is-better post-change distance AUC/recovery lag, RESET_CHANGE < FULL < STALE_HOLD is the expected mechanism ordering."
+  },
+  "stop_rules": [
+    "Stop if L3 event coverage is <70% after task selection/source audit.",
+    "Stop the stale-motion-prior hypothesis if there is no positive L1-vs-L3 RESET interaction.",
+    "Do not train a gate, LoRA, TTT, KV editor, or new motion encoder until Gate C survives.",
+    "Do not run flow-only/kinematics-only/history-length/severity sweeps until Gate C survives."
+  ]
+}
