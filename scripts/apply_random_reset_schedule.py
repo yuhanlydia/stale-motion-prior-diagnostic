@@ -30,6 +30,10 @@ def main() -> int:
             if identity not in schedules:
                 missing.append(identity)
                 continue
+            if not schedules[identity]:
+                # No safe query exists for this episode; omit it from the
+                # random-reset control rather than silently running FULL.
+                continue
             row["random_reset_queries"] = schedules[identity]
         output.append(row)
     if missing:
@@ -42,4 +46,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

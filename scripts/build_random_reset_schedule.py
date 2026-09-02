@@ -44,6 +44,7 @@ def main() -> int:
     for (task, level, requested_seed), episode_seed, length, true_changes in episodes:
         pool = distribution[(task, level)]
         selected = []
+        used_fallback = False
         for _ in true_changes:
             candidates = list(pool)
             rng.shuffle(candidates)
@@ -54,9 +55,24 @@ def main() -> int:
                     chosen = query
                     break
             if chosen is None:
-                raise RuntimeError(f"no valid matched random reset for {(task, level, requested_seed)}")
+                # A degenerate change-time distribution can leave no matched
+                # quantile outside the cooldown window.  Keep the control
+                # usable, but make this deviation explicit in the manifest.
+                safe = [
+                    query for query in range(length)
+                    if all(abs(query - change) > args.cooldown for change in true_changes)
+                    and query not in selected
+                ]
+                if not safe:
+                    # This very short episode has no query outside the true
+                    # change cooldown; it cannot support the control.
+                    used_fallback = True
+                    selected = []
+                    break
+                chosen = safe[rng.randrange(len(safe))]
+                used_fallback = True
             selected.append(chosen)
-        schedule.append({"task": task, "level": level, "seed": requested_seed, "episode_seed": episode_seed, "random_reset_queries": sorted(selected)})
+        schedule.append({"task": task, "level": level, "seed": requested_seed, "episode_seed": episode_seed, "random_reset_queries": sorted(selected), "fallback": used_fallback, "unavailable": not selected})
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in schedule), encoding="utf-8")
     print(f"wrote {len(schedule)} frozen episode schedules to {args.output}")
