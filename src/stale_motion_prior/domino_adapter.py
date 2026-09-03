@@ -23,8 +23,18 @@ from dynamicwam.runtime.ciwam.adapters.domino.composite import (
 from dynamicwam.runtime.ciwam.execution import NativeStepper
 from dynamicwam.runtime.ciwam.flow import HeadFlowBuffer
 from dynamicwam.runtime.ciwam.wam.policy import DynamicWAMPolicy
-from .change import ChangeDetector, ChangeDetectorConfig, commanded_segment_index, commanded_segment_spec
-from .intervention import HistoryIntervention, InterventionConfig, Mode
+from .change import (
+    ChangeDetector,
+    ChangeDetectorConfig,
+    commanded_segment_index,
+    commanded_segment_spec,
+)
+from .intervention import (
+    HistoryIntervention,
+    InterventionConfig,
+    Mode,
+    parse_random_reset_events,
+)
 from .logging import JsonlLogger
 from .geometry import ee_geometry, is_grasped
 from .chunk_telemetry import change_chunk_telemetry
@@ -35,6 +45,7 @@ def _target_xyz(task_env: Any) -> np.ndarray:
     actor = config["target_actor"]
     return np.asarray(actor.get_pose().p, dtype=np.float64)
 
+
 def _workspace_ok(task_env: Any, xyz: np.ndarray) -> bool:
     checker = getattr(task_env, "is_out_of_bounds", None)
     if callable(checker):
@@ -44,22 +55,39 @@ def _workspace_ok(task_env: Any, xyz: np.ndarray) -> bool:
             pass
     return bool(np.isfinite(xyz).all())
 
+
 class DiagnosticDeployModel:
     def __init__(self, usr_args: dict[str, Any]) -> None:
         torch.use_deterministic_algorithms(True)
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
         torch.backends.cuda.matmul.allow_tf32 = False
-        self.policy = DynamicWAMPolicy(usr_args["dynamicwam_deploy_config"], project_root=usr_args["dynamicwam_root"])
+        self.policy = DynamicWAMPolicy(
+            usr_args["dynamicwam_deploy_config"],
+            project_root=usr_args["dynamicwam_root"],
+        )
         self.policy.setup()
         mode = Mode(os.environ.get("SMP_MODE", "full"))
-        random_queries = tuple(int(x) for x in os.environ.get("SMP_RANDOM_RESETS", "").split(",") if x)
+        random_queries = tuple(
+            int(value)
+            for value in os.environ.get("SMP_RANDOM_RESETS", "").split(",")
+            if value
+        )
+        self.random_reset_events = frozenset(
+            parse_random_reset_events(os.environ.get("SMP_RANDOM_RESET_EVENTS", ""))
+        )
         self.history = HistoryIntervention(
             lambda: HeadFlowBuffer(self.policy.runtime.head_flow_config),
-            InterventionConfig(mode=mode, stale_queries=int(os.environ.get("SMP_STALE_QUERIES", "2")), random_reset_queries=random_queries),
+            InterventionConfig(
+                mode=mode,
+                stale_queries=int(os.environ.get("SMP_STALE_QUERIES", "2")),
+                random_reset_queries=random_queries,
+            ),
         )
         self.detector = ChangeDetector(ChangeDetectorConfig())
-        self.logger = JsonlLogger(Path(os.environ.get("SMP_LOG", "runs/queries.jsonl")))
+        self.logger = JsonlLogger(
+            Path(os.environ.get("SMP_LOG", "runs/queries.jsonl"))
+        )
         self.stepper: NativeStepper | None = None
         self.pending: deque[np.ndarray] = deque()
         self.query = 0
@@ -69,6 +97,8 @@ class DiagnosticDeployModel:
         self.policy_rng_seed: int | None = None
         self.last_chunk_size: int | None = None
         self.pending_change_telemetry: dict[str, Any] | None = None
+        self.pending_random_reset_event: dict[str, int] | None = None
+
     def bind_env(self, env: Any) -> None:
         if self.stepper is None or self.stepper.env is not env:
             actual_seed = int(getattr(env, "_smp_episode_seed"))
@@ -76,8 +106,12 @@ class DiagnosticDeployModel:
             torch.manual_seed(self.policy_rng_seed)
             if torch.cuda.is_available():
                 torch.cuda.manual_seed_all(self.policy_rng_seed)
-            self.stepper = NativeStepper(env, action_interval_seconds=self.policy.runtime.action_interval_seconds)
+            self.stepper = NativeStepper(
+                env,
+                action_interval_seconds=self.policy.runtime.action_interval_seconds,
+            )
             self.policy.set_instruction(env.get_instruction())
+
     def finish_episode(self) -> None:
         if self.stepper is not None:
             summary = self.stepper.telemetry.summary()
@@ -94,11 +128,18 @@ class DiagnosticDeployModel:
         self.policy_rng_seed = None
         self.last_chunk_size = None
         self.pending_change_telemetry = None
+        self.pending_random_reset_event = None
+
 
 def get_model(usr_args: dict[str, Any]) -> DiagnosticDeployModel:
     return DiagnosticDeployModel(usr_args)
 
-def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any]) -> None:
+
+def eval(
+    TASK_ENV: Any,
+    model: DiagnosticDeployModel,
+    observation: dict[str, Any],
+) -> None:
     model.bind_env(TASK_ENV)
     clock = getattr(TASK_ENV, "_scene_step_clock", None)
     if clock is None:
@@ -129,10 +170,31 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
             pending_actions=len(model.pending),
             last_chunk_size=model.last_chunk_size,
         )
-    model.history.push(head_camera_frame(observation), simulator_time_seconds=now, change_point=change_point)
+
+    # v4 matched control: fire at the same pending-action count inside a
+    # non-change chunk, rather than immediately before the policy query.
+    random_reset_point = bool(
+        model.history.config.mode is Mode.RANDOM_RESET
+        and (model.query, len(model.pending)) in model.random_reset_events
+    )
+    if random_reset_point:
+        model.pending_random_reset_event = {
+            "query": int(model.query),
+            "actions_remaining": int(len(model.pending)),
+        }
+
+    model.history.push(
+        head_camera_frame(observation),
+        simulator_time_seconds=now,
+        change_point=change_point,
+        random_reset_point=random_reset_point,
+    )
     if not model.pending:
         motion, intervention = model.history.observation()
-        composite_frame = composite_robotwin_frame(observation, model.policy.runtime.observation_config)
+        composite_frame = composite_robotwin_frame(
+            observation,
+            model.policy.runtime.observation_config,
+        )
         packet = {
             "frame": composite_frame,
             "state": extract_state(observation),
@@ -151,41 +213,65 @@ def eval(TASK_ENV: Any, model: DiagnosticDeployModel, observation: dict[str, Any
             "steps_until_next_policy_query": None,
             "chunk_phase": None,
         }
-        model.logger.write({
-            "task": os.environ.get("SMP_TASK", "unknown"),
-            "level": int(os.environ.get("SMP_LEVEL", "-1")),
-            "requested_start_seed": int(os.environ.get("SMP_REQUESTED_SEED", "-1")),
-            "seed": int(getattr(TASK_ENV, "_smp_episode_seed")),
-            "policy_rng_seed": model.policy_rng_seed,
-            "frame_sha256": hashlib.sha256(np.ascontiguousarray(composite_frame).tobytes()).hexdigest(),
-            "action_chunk_sha256": hashlib.sha256(np.ascontiguousarray(actions).tobytes()).hexdigest(),
-            "first_action": np.asarray(actions[0]).tolist(),
-            "query": model.query,
-            "simulator_time": now,
-            "target_xyz": target.tolist(),
-            "change_source": "commanded_segment" if model.commanded_source_seen else "kinematic_detector",
-            "commanded_segment_index": model.commanded_segment_index,
-            "commanded_trajectory_sha256": (
-                hashlib.sha256(json.dumps(segment_spec, sort_keys=True).encode()).hexdigest()
-                if segment_spec is not None
-                else None
-            ),
-            "change_point": bool(model.pending_change_event is not None),
-            "detector_change_point": event.changed,
-            "change_angle_deg": logged_event.direction_deg,
-            "speed_ratio": logged_event.speed_ratio,
-            "target_speed": logged_event.speed,
-            "pre_grasp": not is_grasped(TASK_ENV),
-            **change_telemetry,
-            **geometry,
-            **intervention,
-        })
+        random_event = model.pending_random_reset_event or {
+            "query": None,
+            "actions_remaining": None,
+        }
+        model.logger.write(
+            {
+                "task": os.environ.get("SMP_TASK", "unknown"),
+                "level": int(os.environ.get("SMP_LEVEL", "-1")),
+                "requested_start_seed": int(
+                    os.environ.get("SMP_REQUESTED_SEED", "-1")
+                ),
+                "seed": int(getattr(TASK_ENV, "_smp_episode_seed")),
+                "policy_rng_seed": model.policy_rng_seed,
+                "frame_sha256": hashlib.sha256(
+                    np.ascontiguousarray(composite_frame).tobytes()
+                ).hexdigest(),
+                "action_chunk_sha256": hashlib.sha256(
+                    np.ascontiguousarray(actions).tobytes()
+                ).hexdigest(),
+                "first_action": np.asarray(actions[0]).tolist(),
+                "query": model.query,
+                "simulator_time": now,
+                "target_xyz": target.tolist(),
+                "change_source": (
+                    "commanded_segment"
+                    if model.commanded_source_seen
+                    else "kinematic_detector"
+                ),
+                "commanded_segment_index": model.commanded_segment_index,
+                "commanded_trajectory_sha256": (
+                    hashlib.sha256(
+                        json.dumps(segment_spec, sort_keys=True).encode()
+                    ).hexdigest()
+                    if segment_spec is not None
+                    else None
+                ),
+                "change_point": bool(model.pending_change_event is not None),
+                "detector_change_point": event.changed,
+                "change_angle_deg": logged_event.direction_deg,
+                "speed_ratio": logged_event.speed_ratio,
+                "target_speed": logged_event.speed,
+                "pre_grasp": not is_grasped(TASK_ENV),
+                "random_reset_event_query": random_event["query"],
+                "random_reset_actions_remaining": random_event[
+                    "actions_remaining"
+                ],
+                **change_telemetry,
+                **geometry,
+                **intervention,
+            }
+        )
         model.pending_change_event = None
         model.pending_change_telemetry = None
+        model.pending_random_reset_event = None
         model.query += 1
     if model.stepper is None:
         raise RuntimeError("environment not bound")
     model.stepper.execute(model.pending.popleft())
+
 
 def reset_model(model: DiagnosticDeployModel) -> None:
     model.finish_episode()

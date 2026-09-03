@@ -1,4 +1,4 @@
-"""Phase-matched random-reset controls built only from FULL query telemetry."""
+"""Phase- and chunk-matched random-reset controls from FULL telemetry."""
 
 from __future__ import annotations
 
@@ -16,6 +16,17 @@ def _identity(row: dict) -> tuple[str, int, int, int]:
     )
 
 
+def _change_event(row: dict, *, max_query: int) -> dict:
+    remaining = row.get("actions_remaining_at_change")
+    if remaining is None:
+        raise ValueError("change telemetry lacks actions_remaining_at_change")
+    return {
+        "query": int(row["query"]),
+        "phase": int(row["query"]) / max(1, max_query),
+        "actions_remaining": max(0, int(remaining)),
+    }
+
+
 def build_phase_matched_schedule(
     records: Iterable[dict],
     *,
@@ -23,74 +34,76 @@ def build_phase_matched_schedule(
     rng_seed: int = 0,
     stationary_reference_level: int | None = None,
 ) -> list[dict]:
-    """Build outcome-blind, pre-grasp phase-matched reset controls.
+    """Build outcome-blind reset controls matched in phase and chunk position.
 
-    For episodes that contain true changes, the control preserves the existing
-    design: use the same reset count and the empirical task/level change-time
-    phase distribution while staying outside all true-change cooldown windows.
+    v3 matched only the policy-query phase.  That was insufficient because a
+    real change reset happens at the simulator step of the change, while the
+    old random control reset immediately before the policy query.  DynamicWAM's
+    history buffer uses a policy stride of four environment frames, so these two
+    interventions could expose the model to very different amounts of fresh
+    post-reset history.
 
-    A stationary episode has no native change time.  When
-    ``stationary_reference_level`` is provided, its reset count and normalized
-    phases are borrowed from the same task/requested-seed episode at that
-    reference level (Level 3 in the v3 protocol).  This creates a real
-    stationary-history intervention instead of the old zero-reset no-op.
+    v4 therefore carries ``actions_remaining_at_change`` from FULL telemetry.
+    Each control event is scheduled at a non-change policy-query phase and at
+    the same pending-action count inside the preceding action chunk.  Stationary
+    Level-1 controls borrow both normalized phase and chunk position from the
+    same task/requested-seed Level-3 FULL episode.
     """
 
     grouped: dict[tuple[str, int, int, int], list[dict]] = defaultdict(list)
     for row in records:
         grouped[_identity(row)].append(dict(row))
 
-    phase_pool: dict[tuple[str, int], list[float]] = defaultdict(list)
-    reference_phases: dict[tuple[str, int], list[float]] = defaultdict(list)
-    episode_data: list[
-        tuple[tuple[str, int, int, int], list[dict], list[int], int]
-    ] = []
+    reference_events: dict[tuple[str, int], list[dict]] = defaultdict(list)
+    episode_data: list[tuple[tuple[str, int, int, int], list[dict], list[dict], int, str | None]] = []
 
     for identity, rows in grouped.items():
-        rows.sort(key=lambda r: int(r["query"]))
-        max_query = max((int(r["query"]) for r in rows), default=0)
-        true_changes = [
-            int(r["query"])
-            for r in rows
-            if bool(r.get("change_point")) and bool(r.get("pre_grasp", False))
+        rows.sort(key=lambda row: int(row["query"]))
+        max_query = max((int(row["query"]) for row in rows), default=0)
+        change_rows = [
+            row
+            for row in rows
+            if bool(row.get("change_point")) and bool(row.get("pre_grasp", False))
         ]
+        unavailable_reason: str | None = None
+        true_events: list[dict] = []
+        try:
+            true_events = [
+                _change_event(row, max_query=max_query)
+                for row in change_rows
+            ]
+        except ValueError:
+            unavailable_reason = "missing_chunk_phase_telemetry"
+
         task, level, requested_seed, _ = identity
-        denom = max(1, max_query)
-        for query in true_changes:
-            phase = query / denom
-            phase_pool[(task, level)].append(phase)
-            if stationary_reference_level is not None and level == stationary_reference_level:
-                reference_phases[(task, requested_seed)].append(phase)
-        episode_data.append((identity, rows, true_changes, max_query))
+        if (
+            stationary_reference_level is not None
+            and level == stationary_reference_level
+            and unavailable_reason is None
+        ):
+            reference_events[(task, requested_seed)].extend(true_events)
+        episode_data.append(
+            (identity, rows, true_events, max_query, unavailable_reason)
+        )
 
     rng = random.Random(rng_seed)
     schedule: list[dict] = []
-    for identity, rows, true_changes, max_query in sorted(episode_data):
+    for identity, rows, true_events, max_query, unavailable_reason in sorted(episode_data):
         task, level, requested_seed, episode_seed = identity
         borrowed_reference = False
 
-        if stationary_reference_level is not None and level != stationary_reference_level:
-            target_phases = list(reference_phases.get((task, requested_seed), ()))
+        if unavailable_reason is None and stationary_reference_level is not None and level != stationary_reference_level:
+            target_events = list(reference_events.get((task, requested_seed), ()))
             borrowed_reference = True
-            if not target_phases:
-                schedule.append(
-                    {
-                        "task": task,
-                        "level": level,
-                        "seed": requested_seed,
-                        "episode_seed": episode_seed,
-                        "random_reset_queries": [],
-                        "unavailable": True,
-                        "pre_grasp_matched": True,
-                        "borrowed_reference_level": stationary_reference_level,
-                    }
-                )
-                continue
-        elif true_changes:
-            target_phases = [query / max(1, max_query) for query in true_changes]
-        else:
-            # Backward-compatible behavior for callers that do not request a
-            # stationary reference, and for no-change reference-level episodes.
+            if not target_events:
+                unavailable_reason = "missing_reference_change"
+        elif unavailable_reason is None and true_events:
+            # Use the episode's own true change descriptors. This exactly
+            # matches reset count, normalized phase target and chunk position.
+            target_events = list(true_events)
+        elif unavailable_reason is None:
+            # Backward-compatible zero-reset behavior for a no-change episode
+            # when no cross-level stationary reference is requested.
             schedule.append(
                 {
                     "task": task,
@@ -98,58 +111,113 @@ def build_phase_matched_schedule(
                     "seed": requested_seed,
                     "episode_seed": episode_seed,
                     "random_reset_queries": [],
+                    "random_reset_events": [],
                     "unavailable": False,
                     "pre_grasp_matched": True,
+                    "chunk_phase_matched": True,
                     "borrowed_reference_level": None,
+                }
+            )
+            continue
+        else:
+            target_events = []
+
+        if unavailable_reason is not None:
+            schedule.append(
+                {
+                    "task": task,
+                    "level": level,
+                    "seed": requested_seed,
+                    "episode_seed": episode_seed,
+                    "random_reset_queries": [],
+                    "random_reset_events": [],
+                    "unavailable": True,
+                    "unavailable_reason": unavailable_reason,
+                    "pre_grasp_matched": True,
+                    "chunk_phase_matched": False,
+                    "borrowed_reference_level": (
+                        stationary_reference_level if borrowed_reference else None
+                    ),
                 }
             )
             continue
 
         pregrasp_queries = sorted(
-            {int(r["query"]) for r in rows if bool(r.get("pre_grasp", False))}
+            {
+                int(row["query"])
+                for row in rows
+                if bool(row.get("pre_grasp", False))
+            }
         )
-        # A stationary control intentionally ignores native detector events;
-        # exclude cooldown windows only for genuine same-level changes.
-        excluded_changes = [] if borrowed_reference else true_changes
+        true_change_queries = [] if borrowed_reference else [
+            int(event["query"]) for event in true_events
+        ]
         candidates = [
             query
             for query in pregrasp_queries
-            if all(abs(query - change) > cooldown for change in excluded_changes)
+            if all(
+                abs(query - change) > cooldown
+                for change in true_change_queries
+            )
         ]
-        selected: list[int] = []
+
+        selected: list[dict] = []
         unavailable = False
         denom = max(1, max_query)
-        pool = (
-            target_phases
-            if borrowed_reference
-            else (phase_pool[(task, level)] or target_phases)
-        )
-
-        for _ in target_phases:
-            available = [query for query in candidates if query not in selected]
+        for target in target_events:
+            remaining = int(target["actions_remaining"])
+            used_queries = {int(event["query"]) for event in selected}
+            available = [
+                query
+                for query in candidates
+                if query not in used_queries
+                # query 0 has no preceding action chunk in which an event with
+                # pending actions could occur.
+                and (remaining == 0 or query > 0)
+            ]
             if not available:
                 unavailable = True
                 selected = []
                 break
-            target_phase = rng.choice(pool)
-            distances = [abs(query / denom - target_phase) for query in available]
+            distances = [
+                abs(query / denom - float(target["phase"]))
+                for query in available
+            ]
             best = min(distances)
             tied = [
                 query
                 for query, distance in zip(available, distances)
                 if abs(distance - best) < 1e-12
             ]
-            selected.append(rng.choice(tied))
+            selected_query = rng.choice(tied)
+            selected.append(
+                {
+                    "query": selected_query,
+                    "actions_remaining": remaining,
+                    "source_query": int(target["query"]),
+                    "source_phase": float(target["phase"]),
+                }
+            )
 
+        selected.sort(key=lambda event: (event["query"], event["actions_remaining"]))
         schedule.append(
             {
                 "task": task,
                 "level": level,
                 "seed": requested_seed,
                 "episode_seed": episode_seed,
-                "random_reset_queries": sorted(selected),
+                # Kept for audit/backward compatibility. v4 execution uses
+                # random_reset_events, not query-boundary resets.
+                "random_reset_queries": [
+                    int(event["query"]) for event in selected
+                ],
+                "random_reset_events": selected,
                 "unavailable": unavailable,
+                "unavailable_reason": (
+                    "no_chunk_phase_matched_query" if unavailable else None
+                ),
                 "pre_grasp_matched": True,
+                "chunk_phase_matched": not unavailable,
                 "borrowed_reference_level": (
                     stationary_reference_level if borrowed_reference else None
                 ),

@@ -1,0 +1,36 @@
+{
+  "protocol": "v4_chunk_phase_matched_controls",
+  "checkpoint": "released DynamicWAM absolute_motion_v2",
+  "tasks": ["grab_roller", "move_stapler_pad", "place_mouse_pad"],
+  "levels": [1, 3],
+  "requested_seeds": [137, 138, 139, 140, 141, 142, 143, 144, 145, 146],
+  "conditions": {
+    "L1": ["full", "random_reset"],
+    "L3": ["full", "reset_change", "random_reset", "stale_hold"]
+  },
+  "random_control": {
+    "pre_grasp_only": true,
+    "exclude_true_change_cooldown_queries": 2,
+    "match_normalized_phase": true,
+    "match_actions_remaining_at_change": true,
+    "execution_semantics": "environment_step_reset_then_rebuild_before_next_query",
+    "rng_seed": 20260904
+  },
+  "existing_reusable": {
+    "grab_roller_L3_reset_change_seeds": [137, 138, 139, 140, 141, 142, 143, 144, 145, 146]
+  },
+  "next_development_screen": {
+    "condition": "reset_change",
+    "level": 3,
+    "tasks": ["move_stapler_pad", "place_mouse_pad"],
+    "seeds": [137, 138, 139, 140, 141],
+    "new_runs": 10
+  },
+  "gpu": {
+    "minimum_vram_gb": 16,
+    "precision": "bf16",
+    "policy_batch_size": 1,
+    "cpu_t5_patch": true,
+    "one_model_process_per_gpu": true
+  }
+}
