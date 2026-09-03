@@ -75,3 +75,20 @@ def test_stationary_level_without_reference_change_is_unavailable():
     assert schedule[0]['random_reset_queries'] == []
     assert schedule[0]['unavailable'] is True
     assert schedule[0]['borrowed_reference_level'] == 3
+
+
+def test_stationary_reference_ignores_native_detector_event():
+    records = [
+        _row(query, level=1, seed=101, req=7, change=query == 1)
+        for query in range(7)
+    ] + [
+        _row(query, level=3, seed=202, req=7, change=query == 3)
+        for query in range(7)
+    ]
+    schedule = build_phase_matched_schedule(
+        records, cooldown=1, rng_seed=0, stationary_reference_level=3
+    )
+    stationary = next(row for row in schedule if row['level'] == 1)
+    assert stationary['borrowed_reference_level'] == 3
+    assert stationary['random_reset_queries'] == [3]
+    assert stationary['unavailable'] is False

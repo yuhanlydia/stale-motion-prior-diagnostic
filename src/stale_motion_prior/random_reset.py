@@ -69,9 +69,7 @@ def build_phase_matched_schedule(
         task, level, requested_seed, episode_seed = identity
         borrowed_reference = False
 
-        if true_changes:
-            target_phases = [query / max(1, max_query) for query in true_changes]
-        elif stationary_reference_level is not None and level != stationary_reference_level:
+        if stationary_reference_level is not None and level != stationary_reference_level:
             target_phases = list(reference_phases.get((task, requested_seed), ()))
             borrowed_reference = True
             if not target_phases:
@@ -88,6 +86,8 @@ def build_phase_matched_schedule(
                     }
                 )
                 continue
+        elif true_changes:
+            target_phases = [query / max(1, max_query) for query in true_changes]
         else:
             # Backward-compatible behavior for callers that do not request a
             # stationary reference, and for no-change reference-level episodes.
@@ -108,10 +108,13 @@ def build_phase_matched_schedule(
         pregrasp_queries = sorted(
             {int(r["query"]) for r in rows if bool(r.get("pre_grasp", False))}
         )
+        # A stationary control intentionally ignores native detector events;
+        # exclude cooldown windows only for genuine same-level changes.
+        excluded_changes = [] if borrowed_reference else true_changes
         candidates = [
             query
             for query in pregrasp_queries
-            if all(abs(query - change) > cooldown for change in true_changes)
+            if all(abs(query - change) > cooldown for change in excluded_changes)
         ]
         selected: list[int] = []
         unavailable = False
