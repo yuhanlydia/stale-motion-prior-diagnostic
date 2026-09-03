@@ -1,203 +1,158 @@
 # Stale Motion Prior Diagnostic
 
-Inference-only causal diagnostics for the hypothesis:
+Inference-only causal diagnostics on **DynamicWAM + DOMINO** for one hypothesis:
 
-> Truthful motion history helps under stationary dynamics but becomes a stale,
-> causally harmful prior immediately after an abrupt regime change.
+> Truthful motion history helps under stationary dynamics but can become a causally harmful stale prior immediately after an abrupt regime change.
 
-The first gate uses the released DynamicWAM checkpoint on DOMINO. It does not
-train, fine-tune, alter KV state, or change current RGB observations. Only the
-explicit history-flow/kinematic buffer is intervened on.
+No weights, KV state, current RGB observation, language input, or action head are trained or altered. The experiment intervenes only on DynamicWAM's explicit history-flow / kinematic history interface.
 
-## Gate-0 design
+## Current protocol: v3
 
-The four decisive paired conditions are:
+The first GPU rollout exposed a protocol issue before a scientific conclusion could be drawn: DOMINO Level 1 has no abrupt change, so `reset_change` is identical to `full`. The old `(RESET-FULL)_L3 - (RESET-FULL)_L1` interaction therefore has a structurally zero L1 term and is no longer the primary gate.
+
+v3 uses a **real stationary reset control**. Each L1 FULL episode borrows the number and normalized phase of true L3 changes from the same task and `requested_start_seed`; a pre-grasp L1 reset is then placed at the nearest valid phase without looking at SR/MS or policy loss.
+
+See:
+
+- `docs/DECISIVE_SMOKE_PROTOCOL_V3.md` — canonical scientific protocol.
+- `configs/decisive_smoke_v3.json` — frozen smoke settings.
+- `docs/GPU_16GB_EXECUTION.md` — 16GB/24GB execution guidance.
+- `docs/DECISIVE_SMOKE_PROTOCOL.md` — developmental v2 protocol retained for audit history.
+
+## v3 conditions
+
+Level 1 needs only:
 
 | Condition | Intervention |
 |---|---|
-| `full` | Released DynamicWAM behavior |
+| `full` | Normal paired DynamicWAM history |
+| `random_reset` | Outcome-blind stationary reset matched to the same task/requested-seed L3 change phase |
+
+Level 3 uses:
+
+| Condition | Intervention |
+|---|---|
+| `full` | Normal paired DynamicWAM history |
 | `reset_change` | Clear pre-change motion history at a simulator-GT change; retain current and all subsequent observations |
-| `random_reset` | Same reset count and normalized-time distribution, but away from true changes |
-| `stale_hold` | Update current RGB, but freeze the pre-change motion packet for two policy queries |
+| `random_reset` | Same reset count/phase distribution, but away from true changes |
+| `stale_hold` | Keep current RGB fresh while holding the pre-change motion packet for two policy queries |
 
-The preregistered detector uses only simulator target motion: direction change
-greater than 45 degrees or relative speed change greater than 0.5, with minimum
-speed, pre-grasp, workspace, and two-query cooldown eligibility checks.
+The fallback detector uses simulator target motion only: direction change >45 degrees or relative speed change >0.5, with minimum speed, pre-grasp, workspace, and two-query cooldown eligibility. Explicit DOMINO `current_segment_idx` is preferred when it genuinely exists.
 
-Primary outcomes remain DOMINO SR and MS. Mechanism outcomes are three-query
-post-change gripper-target distance AUC and recovery lag. The main interaction
-is `(RESET-FULL)_L3 - (RESET-FULL)_L1`; random reset must not reproduce the L3
-gain. The strongest local ordering is `RESET > FULL > STALE`.
+## Primary outcomes and gate
+
+Headline metrics remain official DOMINO Success Rate (SR) and Manipulation Score (MS).
+
+Define:
+
+- `G_change = (MS_reset_change - MS_full)_L3`
+- `G_stationary = (MS_random_reset - MS_full)_L1`
+
+The v3 headline statistic is:
+
+`R = G_change - G_stationary`.
+
+The hypothesis predicts `R > 0`. Supporting requirements are:
+
+1. `G_change > 0`.
+2. `(RESET_CHANGE - RANDOM_RESET)_L3 > 0`.
+3. `G_stationary <= 0` is preferred; a positive stationary-reset benefit weakens the stale-prior interpretation.
+4. `(STALE_HOLD - FULL)_L3 < 0` is the expected mechanism sign.
+
+For lower-is-better local distance AUC/recovery lag, the expected ordering is **RESET_CHANGE < FULL < STALE_HOLD**.
+
+Stop the direction if the v3 reversal is absent/reversed or if L3 RESET_CHANGE cannot beat its matched L3 RANDOM_RESET control. Do not rescue it post hoc by tuning detector thresholds, stale duration, history length, or task subset.
 
 ## Reproducibility pins
 
-- DynamicWAM code: record with `git rev-parse HEAD` (initial checkout used
-  `db91c4fe856b42d5500150e11e4f86f407f21dbc`).
-- DynamicWAM checkpoint revision:
-  `925cbb7aef5033c924f809ae87479d39fe9f76ff`.
-- Full checkpoint SHA-256:
-  `7c0dfc44a785ea1f6bd1f833f09dcadc2e470dadb1ba5508fa98918e147671d7`.
-- DOMINO evaluation commit is read from the released config/manifest, not from
-  an unpinned standalone clone.
+- DynamicWAM checkpoint revision: `925cbb7aef5033c924f809ae87479d39fe9f76ff`.
+- Checkpoint SHA-256: `7c0dfc44a785ea1f6bd1f833f09dcadc2e470dadb1ba5508fa98918e147671d7`.
+- Record the exact DynamicWAM code with `git rev-parse HEAD`; the compatibility patches in `patches/` must remain visible in provenance.
+- `patches/dynamicwam-feb7921-inference-schema.patch` only accepts integrity fields generated by the released config loader; it does not alter model tensors/inference values.
+- `patches/dynamicwam-cpu-t5.patch` is the 16GB-safe mode: frozen UMT5 stays BF16 on CPU and only its cached instruction embedding moves to CUDA.
 
-At 2026-09-01 the checkpoint YAML has one additional benchmark integrity field
-not accepted by DynamicWAM `main`. Do not delete it. Pin a compatible upstream
-commit or wait for the upstream schema fix; mixing latest code and released
-config silently is not acceptable.
-
-The initial release commit accepts that benchmark field, but its inference
-loader rejects three integrity fields generated by its own config loader.
-`patches/dynamicwam-feb7921-inference-schema.patch` adds those exact generated
-keys to validation; it does not alter any model tensor or inference value.
-
-For 16GB GPUs, `patches/dynamicwam-cpu-t5.patch` keeps the frozen UMT5 encoder
-in BF16 on CPU and copies only its resulting instruction embedding to CUDA.
-This preserves weights, dtype, tokenization, and policy inputs; it trades a
-one-time per-instruction latency increase for roughly 11GB less GPU residency.
-
-## Install
+## Install / preflight
 
 ```bash
 git clone https://github.com/Autumn1337/DynamicWAM.git
-git clone https://github.com/OWNER/stale-motion-prior-diagnostic.git
+git clone https://github.com/yuhanlydia/stale-motion-prior-diagnostic.git
 cd stale-motion-prior-diagnostic
 python -m venv .venv
 .venv/bin/pip install -e '.[test,analysis]'
 .venv/bin/pytest
+python scripts/preflight.py
 ```
 
-Install this package in both the DynamicWAM inference environment and the
-DOMINO evaluation environment. The only integration patch replaces the
-official adapter module with a three-line import shim while preserving a
-recoverable backup:
+DOMINO/SAPIEN requires a real NVIDIA Vulkan physical device in addition to CUDA. The pinned RoboTwin embodiments archive also contains macOS resource forks; `scripts/extract_robotwin_archive.py` verifies the archive SHA, strips only `__MACOSX`, rejects unsafe members, and emits provenance.
+
+## 16GB execution
+
+Do **not** force model batch size >1. The released DynamicWAM `HeadFlowRunner.sample_chunk()` hard-codes a leading batch dimension of 1, and DOMINO is a closed-loop simulator evaluation. Changing that runtime would confound the benchmark.
+
+For 16GB:
 
 ```bash
-python scripts/install_adapter.py /path/to/DynamicWAM
-# restore later:
-python scripts/install_adapter.py /path/to/DynamicWAM --restore
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export CUDA_MODULE_LOADING=LAZY
 ```
 
-The adapter reads `SMP_MODE`, `SMP_LOG`, `SMP_STALE_QUERIES`, and
-`SMP_RANDOM_RESETS`. Thus checkpoint, observation, task, instruction, seed, and
-official eval configuration stay identical across conditions.
+Use one DynamicWAM process per GPU, BF16, and the CPU-T5 patch. Throughput comes from reusing valid FULL trajectories/results and omitting no-op L1 conditions, not from changing policy batching. Details: `docs/GPU_16GB_EXECUTION.md`.
 
-## Generate the paired smoke matrix
+## v3 run matrix
+
+Frozen tasks:
+
+- `grab_roller`
+- `move_stapler_pad`
+- `place_mouse_pad`
+
+Requested seeds: `137..146`.
+
+If FULL must be rerun, there are 180 condition runs. If valid FULL logs/results/snapshots already exist under identical provenance, only 120 new intervention runs are needed.
+
+Build the v3 schedule from FULL logs at **both** levels:
 
 ```bash
-smp-matrix \
-  --tasks grab_roller move_stapler_pad place_mouse_pad \
-  --levels 1 3 \
-  --seeds 137 138 139 140 141 142 143 144 145 146 \
-  --output runs/smoke.jsonl
+PYTHONPATH=src python scripts/build_random_reset_schedule_phase_matched.py \
+  runs/full_logs_l1 runs/full_logs_l3 \
+  --output runs/random_reset_schedule_v3.jsonl \
+  --cooldown 2 \
+  --seed 20260903 \
+  --stationary-reference-level 3
 ```
 
-Before execution, add each row's exact argv-only `command` for the pinned
-DynamicWAM/DOMINO evaluator. Do not use shell strings. Run under a hard ten-hour
-budget with crash-safe per-run logs and a resumable journal:
+Apply it with `scripts/apply_random_reset_schedule.py`. Expensive rows should use `scripts/run_budget_strict.py`; authoritative metrics must come from DOMINO `_metrics.json` / `_episodes_detail.json` via `scripts/harvest_official_metrics.py`.
+
+## Analysis and tracked result summaries
+
+Cross-level statistics pair by `requested_start_seed`, because DOMINO may advance infeasible requested seeds to different feasible actual seeds at different levels. Within each task/level/requested-seed, all conditions are still required to resolve to the same actual simulator seed.
 
 ```bash
-python scripts/run_budget.py runs/smoke_commands.jsonl --hours 10
+smp-analyze runs/episode_results_v3.jsonl --draws 10000
 ```
 
-Run `python scripts/preflight.py` first. A CUDA-visible container is not enough:
-DOMINO/SAPIEN also requires an NVIDIA Vulkan physical device. A container
-normally exposes it with `NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics`.
-The preflight trusts a successful physical-device probe even when that
-declarative variable is incomplete. If `libGLX_nvidia.so` is present but the
-ICD cannot resolve `vkCreateInstance`, install the GLVND runtime (`libegl1`,
-`libglvnd0`, and `libopengl0` on Ubuntu) before rebuilding the container.
-DOMINO's render probe can print
-`Render Error` and exit with code zero, so the budget runner additionally
-requires a nonempty query log and `SYNC-EPISODE-SUMMARY` before marking a row
-complete.
-
-`scripts/prepare_eval_queue.py` can generate exact one-episode official DOMINO
-configs and argv-only commands. It snapshots Level 1/2/3 task configs by
-changing only `dynamic_level`, sets a unique official output root, and includes
-the pinned runtime/CuRobo paths. The queue runner honors each row's explicit
-working directory and environment.
-
-Queue rows should be ordered by `(task, level, seed)` and then all four
-conditions, ensuring paired seeds complete together as often as possible.
-
-## Random-reset control
-
-Random reset timing is a two-pass control. First run FULL to collect valid
-episode lengths and true-change normalized times. Freeze that distribution and
-draw random reset queries with the same count, stratified by task/level, while
-excluding true-change cooldown windows. Commit the generated schedule before
-opening condition outcomes. Never tune it using policy loss or final MS.
-
-Use `scripts/build_random_reset_schedule.py` on FULL query logs to freeze that
-schedule. It reads only task/level/seed, episode length, pre-grasp change flags,
-and query indices—never outcomes. `scripts/summarize_mechanism.py` then computes
-per-change distance AUC and recovery lag from completed condition logs.
-
-Use `scripts/filter_queue.py` to run the FULL audit phase first. Then build the
-schedule and inject it with `scripts/apply_random_reset_schedule.py`; an absent
-task/level/seed schedule is a hard error, so RANDOM_RESET can never silently run
-as a no-op. DOMINO may reject an infeasible requested raw seed and advance. The
-small recorded patch stores the actual setup seed on the task environment;
-query logs and official harvesting pair on that simulator-reported seed while
-retaining `requested_start_seed` as provenance.
-
-## Analysis
-
-Episode result JSONL must contain `task`, `level`, `seed`, `condition`, `sr`,
-and `ms`. Then:
+Raw `runs/` stays gitignored. Publish a compact auditable result to GitHub with:
 
 ```bash
-smp-analyze runs/episode_results.jsonl --draws 10000
+python scripts/publish_results.py \
+  --results runs/episode_results_v3.jsonl \
+  --full-logs runs/full_logs_l1 runs/full_logs_l3 \
+  --label decisive_smoke_v3
+
+git add published_results/
+git commit -m "Publish stale-motion v3 smoke results"
+git push
 ```
 
-Generate that JSONL from the benchmark's authoritative `_metrics.json` and
-`_episodes_detail.json` using `scripts/harvest_official_metrics.py`. It requires
-exactly one reported episode and verifies the simulator-reported seed against
-the paired queue; missing or ambiguous result directories are a hard failure.
+This prevents the previous situation where GPU results existed only on the runner machine and could not be audited from the repository.
 
-Pilot inference uses paired episode bootstrap. The 35-task confirmatory run
-must use task-balanced hierarchical bootstrap (resample tasks, then paired
-seeds within task). Report delta SR, delta MS, delta distance AUC, and delta
-recovery lag with 95% confidence intervals.
+## What happens only if v3 passes
 
-The analyzer bootstraps the L3-minus-L1 interaction directly on identities
-having all required paired cells; it does not subtract two independently
-estimated intervals. It also reports RANDOM-FULL and STALE-FULL controls for
-both SR and MS.
+Do not train a learned method yet. First run causal decomposition:
 
-## Gates and stopping
+- flow-history reset only;
+- kinematic-history reset only;
+- both;
+- neither.
 
-1. **A — reproduction:** one official L1 task produces nonzero SR/MS plus
-   replay and complete telemetry.
-2. **B — events:** at least 70% of selected L3 episodes contain an eligible
-   pre-grasp abrupt change.
-3. **C — phenomenon:** L3 reset improves paired MS, random reset does not, and
-   the L3 reset gain exceeds L1.
-4. **D — causal ordering:** preferably RESET > FULL > STALE in local distance
-   AUC or recovery lag.
-
-Stop if there is no L1-vs-L3 interaction. Do not proceed to flow-only reset,
-kinematic-only reset, history-length sweeps, severity sweeps, or any learned
-method until Gate-0 survives.
-
-## Known limitations before the first rollout
-
-- The official DynamicWAM environment currently requires FlashAttention
-  2.8.3.post1. On hosts without `nvcc`, install a Torch 2.7/CUDA 12.6/CPython
-  3.10/SM86-compatible wheel or add the matching CUDA toolkit.
-- A 16GB RTX A4000 may be below the practical memory requirement of the
-  released video-action model. Checkpoint verification is CPU-safe; rollout
-  OOM is a Gate-A infrastructure failure, not evidence against the hypothesis.
-- Target pose comes from DOMINO's dynamic-motion config. Left/right EE poses
-  come from the benchmark robot API; telemetry records both distances and uses
-  their minimum as the policy-agnostic approach distance. First target-gripper
-  contact latches the pre-grasp eligibility false.
-
-### RoboTwin embodiments archive bug
-
-The pinned `embodiments.zip` SHA is correct, but the archive contains macOS
-resource forks while DynamicWAM's manifest records a cleaned extraction tree.
-The upstream pre-extraction count therefore fails before it can clean anything.
-`scripts/extract_robotwin_archive.py` verifies the pinned archive SHA, rejects
-unsafe members, excludes only `__MACOSX`, refuses overwrite, and writes a JSON
-provenance report. This workaround must remain visible in every run manifest.
+Only after identifying which history path causes change-point harm should an adaptive history-trust mechanism be designed.
