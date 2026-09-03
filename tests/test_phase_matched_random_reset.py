@@ -29,3 +29,12 @@ def test_episode_without_safe_pregrasp_query_is_marked_unavailable():
     schedule = build_phase_matched_schedule(records, cooldown=2, rng_seed=0)
     assert schedule[0]['random_reset_queries'] == []
     assert schedule[0]['unavailable'] is True
+
+
+def test_episode_without_change_has_zero_reset_control():
+    schedule = build_phase_matched_schedule([_row(0), _row(1)], cooldown=2)
+    assert schedule == [{
+        'task': 'task', 'level': 3, 'seed': 7, 'episode_seed': 101,
+        'random_reset_queries': [], 'unavailable': False,
+        'pre_grasp_matched': True,
+    }]

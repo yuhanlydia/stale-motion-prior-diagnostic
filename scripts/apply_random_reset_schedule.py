@@ -18,7 +18,11 @@ def main() -> int:
     for line in args.schedule.read_text().splitlines():
         if line.strip():
             row = json.loads(line)
-            schedules[(row["task"], int(row["level"]), int(row["seed"]))] = list(row["random_reset_queries"])
+            key = (row["task"], int(row["level"]), int(row["seed"]))
+            schedules[key] = {
+                "queries": list(row["random_reset_queries"]),
+                "unavailable": bool(row.get("unavailable", False)),
+            }
     output = []
     missing = []
     for line in args.queue.read_text().splitlines():
@@ -30,11 +34,11 @@ def main() -> int:
             if identity not in schedules:
                 missing.append(identity)
                 continue
-            if not schedules[identity]:
+            if schedules[identity]["unavailable"]:
                 # No safe query exists for this episode; omit it from the
                 # random-reset control rather than silently running FULL.
                 continue
-            row["random_reset_queries"] = schedules[identity]
+            row["random_reset_queries"] = schedules[identity]["queries"]
         output.append(row)
     if missing:
         raise RuntimeError(f"missing frozen schedules for {sorted(set(missing))}")

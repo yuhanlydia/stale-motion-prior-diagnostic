@@ -51,9 +51,20 @@ def build_phase_matched_schedule(
     rng = random.Random(rng_seed)
     schedule: list[dict] = []
     for identity, rows, true_changes, max_query in sorted(episode_data):
-        if not true_changes:
-            continue
         task, level, requested_seed, episode_seed = identity
+        if not true_changes:
+            # Zero true changes means the matched control legitimately has
+            # zero resets (an L1 stationary episode), not a missing schedule.
+            schedule.append({
+                "task": task,
+                "level": level,
+                "seed": requested_seed,
+                "episode_seed": episode_seed,
+                "random_reset_queries": [],
+                "unavailable": False,
+                "pre_grasp_matched": True,
+            })
+            continue
         pregrasp_queries = sorted(
             {int(r["query"]) for r in rows if bool(r.get("pre_grasp", False))}
         )
